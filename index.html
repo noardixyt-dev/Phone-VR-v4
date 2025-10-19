@@ -2,166 +2,117 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>VR Dual Camera HUD</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>VR Phone Camera HUD</title>
 <style>
-html,body{margin:0;padding:0;width:100%;height:100%;background:#000;overflow:hidden;}
-#root{display:flex;justify-content:center;align-items:center;height:100vh;gap:24px;position:relative;}
-canvas{background:#000;border-radius:8px;object-fit:contain;pointer-events:none;}
-.menu{position:absolute;display:flex;gap:6px;padding:6px;background:rgba(30,30,30,0.9);border-radius:6px;z-index:10;pointer-events:auto;user-select:none;}
-button{padding:5px 10px;font-size:13px;cursor:pointer;background:#111;color:white;border:1px solid #333;border-radius:4px;}
+html,body{height:100%;margin:0;background:#000;color:#fff;font-family:system-ui,-apple-system,sans-serif;overflow:hidden;}
+#container{width:100%;height:100vh;display:flex;align-items:center;justify-content:center;position:relative;gap:20px;}
+canvas{background:#000;border-radius:8px;}
+.menuBtn{background:linear-gradient(135deg,#222,#555);color:#fff;border:none;padding:6px 10px;border-radius:6px;font-size:14px;cursor:pointer;margin:2px;}
+.menuSlider{width:100px;}
+.menuBox{background:rgba(0,0,0,0.7);border-radius:10px;padding:10px;display:flex;flex-direction:row;gap:4px;pointer-events:auto;position:absolute;}
 </style>
 </head>
 <body>
-<div id="root">
+<div id="container">
   <canvas id="left"></canvas>
   <canvas id="right"></canvas>
 </div>
-
 <video id="video" autoplay playsinline muted style="display:none"></video>
-
 <script>
-const video = document.getElementById('video');
-const left = document.getElementById('left');
-const right = document.getElementById('right');
-let stream = null, raf = null;
+const video=document.getElementById('video');
+const leftCanvas=document.getElementById('left');
+const rightCanvas=document.getElementById('right');
 
-// ---------- MENU ----------
-let menuVisible = false;
-let spawnAlpha = 0, spawnBeta = 0;
-const menuLeft = document.createElement('div');
-menuLeft.className = 'menu';
-const menuRight = document.createElement('div');
-menuRight.className = 'menu';
-['Start Camera', 'Fullscreen'].forEach(t=>{
-  const bL = document.createElement('button');
-  const bR = document.createElement('button');
-  bL.textContent = bR.textContent = t;
-  bL.onclick = bR.onclick = ()=> {
-    if(t==='Start Camera') startCamera();
-    if(t==='Fullscreen') toggleFullscreen();
-  }
-  menuLeft.appendChild(bL);
-  menuRight.appendChild(bR);
-});
-document.body.appendChild(menuLeft);
-document.body.appendChild(menuRight);
-menuLeft.style.display='none';
-menuRight.style.display='none';
+let stream=null,rafId=null,zoom=1,eyeGap=20;
+let menuVisible=false,menuAngle=0,deviceYaw=0,devicePitch=0,lastTap=0,alwaysShowCrosshair=false;
+const rotCanvas=document.createElement('canvas');
+const rotCtx=rotCanvas.getContext('2d');
 
-// ---------- FULLSCREEN ----------
-function toggleFullscreen() {
-  if(!document.fullscreenElement) document.documentElement.requestFullscreen();
-  else document.exitFullscreen();
-}
+const menuBox=document.createElement('div');menuBox.className='menuBox';
+const startBtn=document.createElement('button');startBtn.className='menuBtn';startBtn.textContent='Start Camera';
+const fsBtn=document.createElement('button');fsBtn.className='menuBtn';fsBtn.textContent='Fullscreen';
+const zoomSlider=document.createElement('input');zoomSlider.type='range';zoomSlider.min='1';zoomSlider.max='2';zoomSlider.step='0.01';zoomSlider.value='1';zoomSlider.className='menuSlider';
+menuBox.appendChild(startBtn);menuBox.appendChild(fsBtn);menuBox.appendChild(zoomSlider);
+document.body.appendChild(menuBox);menuBox.style.display='none';
 
-// ---------- START CAMERA ----------
 async function startCamera(){
+  if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}
   try{
-    const constraints = {video:{facingMode:'environment', width:{ideal:4096}, height:{ideal:2160}, frameRate:{ideal:60}}, audio:false};
-    stream = await navigator.mediaDevices.getUserMedia(constraints);
-    video.srcObject = stream;
+    const constraints={video:{facingMode:'environment',width:{ideal:4096},height:{ideal:2160}},audio:false};
+    stream=await navigator.mediaDevices.getUserMedia(constraints);
+    video.srcObject=stream;
     await video.play();
+    resizeCanvases();
   }catch(e){alert('Camera error: '+e.message);}
 }
 
-// ---------- CANVAS ----------
-function resizeCanvases(){
-  const size = Math.min(window.innerWidth/2, window.innerHeight);
-  [left,right].forEach(c=>{
-    c.style.width=c.style.height=size+'px';
-    c.width=c.height=size*(window.devicePixelRatio||1);
-  });
+function toggleFullscreen(){
+  if(!document.fullscreenElement)document.body.requestFullscreen?.();
+  else document.exitFullscreen?.();
 }
-window.addEventListener('resize', resizeCanvases);
+
+startBtn.onclick=startCamera;
+fsBtn.onclick=toggleFullscreen;
+zoomSlider.oninput=e=>{zoom=parseFloat(e.target.value);};
+
+function resizeCanvases(){
+  const dpr=window.devicePixelRatio||1;
+  const w=window.innerWidth,h=window.innerHeight;
+  const scale=0.85;
+  const eyeW=Math.floor(w*scale/2),eyeH=Math.floor(h*scale);
+  [leftCanvas,rightCanvas].forEach(c=>{c.width=c.height=Math.floor(eyeW*dpr);c.style.width=c.style.height=eyeW+'px';});
+  leftCanvas.style.left=`calc(50% - ${eyeW+eyeGap/2}px)`;
+  rightCanvas.style.left=`calc(50% + ${eyeGap/2}px)`;
+  leftCanvas.style.top=rightCanvas.style.top=`calc(50% - ${eyeH/2}px)`;
+}
+window.addEventListener('resize',resizeCanvases);
 resizeCanvases();
 
-// ---------- DEVICE ORIENTATION ----------
-let alpha=0,beta=0,gamma=0;
-window.addEventListener('deviceorientation', e=>{
-  alpha = e.alpha || 0;
-  beta = e.beta || 0;
-  gamma = e.gamma || 0;
+window.addEventListener('deviceorientation',e=>{
+  deviceYaw=e.alpha||0;
+  devicePitch=e.beta||0;
 });
 
-// ---------- DRAW LOOP ----------
-function drawLoop(){
-  const w = left.width, h = left.height;
-  const ctxL = left.getContext('2d');
-  const ctxR = right.getContext('2d');
-  ctxL.clearRect(0,0,w,h);
-  ctxR.clearRect(0,0,w,h);
-
-  if(video.videoWidth && video.videoHeight){
-    const size = Math.min(video.videoWidth, video.videoHeight);
-    const sx = (video.videoWidth - size)/2;
-    const sy = (video.videoHeight - size)/2;
-    ctxL.imageSmoothingEnabled = ctxR.imageSmoothingEnabled = false;
-    ctxL.drawImage(video,sx,sy,size,size,0,0,w,h);
-    ctxR.drawImage(video,sx,sy,size,size,0,0,w,h);
+window.addEventListener('touchstart',e=>{
+  const now=Date.now();
+  if(now-lastTap<300){
+    menuVisible=!menuVisible;
+    menuBox.style.display=menuVisible?'flex':'none';
+    if(menuVisible)menuAngle=deviceYaw;
   }
+  lastTap=now;
+});
 
-  if(menuVisible){
-    updateMenuPosition();
-    drawCrosshair(ctxL,w,h);
-    drawCrosshair(ctxR,w,h);
-  }
-
-  raf = requestAnimationFrame(drawLoop);
+function ensureRotated(){
+  if(video.videoHeight<=video.videoWidth)return {src:video,w:video.videoWidth,h:video.videoHeight};
+  if(rotCanvas.width!==video.videoHeight||rotCanvas.height!==video.videoWidth){rotCanvas.width=video.videoHeight;rotCanvas.height=video.videoWidth;}
+  rotCtx.save();rotCtx.clearRect(0,0,rotCanvas.width,rotCanvas.height);rotCtx.translate(rotCanvas.width,0);rotCtx.rotate(Math.PI/2);rotCtx.drawImage(video,0,0,video.videoWidth,video.videoHeight);rotCtx.restore();
+  return {src:rotCanvas,w:rotCanvas.width,h:rotCanvas.height};
 }
 
-// ---------- CROSSHAIR ----------
-function drawCrosshair(ctx,w,h){
-  const radius=8;
+function drawCrosshair(ctx){
+  if(!menuVisible&&!alwaysShowCrosshair)return;
+  const cx=ctx.canvas.width/2,cy=ctx.canvas.height/2;
   ctx.strokeStyle='white';
-  ctx.fillStyle='transparent';
+  ctx.lineWidth=2;
   ctx.beginPath();
-  ctx.arc(w/2,h/2,radius,0,2*Math.PI);
-  ctx.fill();
+  ctx.arc(cx,cy,8,0,2*Math.PI);
   ctx.stroke();
 }
 
-// ---------- MENU POSITION ----------
-let baseX=0, baseY=0;
-function updateMenuPosition(){
-  const sensitivity = 3;
-  const dx = (spawnAlpha - alpha)*sensitivity;
-  const dy = (spawnBeta - beta)*sensitivity;
-
-  const wLeft = left.clientWidth, hLeft = left.clientHeight;
-  const wRight = right.clientWidth, hRight = right.clientHeight;
-
-  menuLeft.style.left = Math.min(Math.max(baseX+dx,0), wLeft-menuLeft.offsetWidth)+'px';
-  menuLeft.style.top  = Math.min(Math.max(baseY+dy,0), hLeft-menuLeft.offsetHeight)+'px';
-
-  menuRight.style.left = Math.min(Math.max(baseX+dx,0), wRight-menuRight.offsetWidth)+'px';
-  menuRight.style.top  = Math.min(Math.max(baseY+dy,0), hRight-menuRight.offsetHeight)+'px';
-
-  menuLeft.style.display='flex';
-  menuRight.style.display='flex';
+function drawLoop(){
+  const ctxL=leftCanvas.getContext('2d'),ctxR=rightCanvas.getContext('2d');
+  if(!video.videoWidth||!video.videoHeight){rafId=requestAnimationFrame(drawLoop);return;}
+  const {src,w,h}=ensureRotated();
+  [ctxL,ctxR].forEach(ctx=>{ctx.clearRect(0,0,ctx.canvas.width,ctx.canvas.height);
+    const sw=w/zoom,sh=h/zoom;
+    const sx=(w-sw)/2,sy=(h-sh)/2;
+    ctx.drawImage(src,sx,sy,sw,sh,0,0,ctx.canvas.width,ctx.canvas.height);
+    drawCrosshair(ctx);
+  });
+  rafId=requestAnimationFrame(drawLoop);
 }
-
-// ---------- DOUBLE TAP ----------
-let lastTap = 0;
-window.addEventListener('touchstart', e=>{
-  const now = Date.now();
-  if(now - lastTap < 300){
-    menuVisible = !menuVisible;
-    if(menuVisible){
-      spawnAlpha = alpha;
-      spawnBeta = beta;
-      baseX = left.clientWidth/2 - menuLeft.offsetWidth/2;
-      baseY = left.clientHeight/2 - menuLeft.offsetHeight/2;
-      updateMenuPosition();
-    }else{
-      menuLeft.style.display='none';
-      menuRight.style.display='none';
-    }
-  }
-  lastTap = now;
-});
-
-// ---------- START ----------
 drawLoop();
 </script>
 </body>
