@@ -3,72 +3,38 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Dual-Eye VR Camera — High Resolution</title>
+<title>VR Dual Camera — Floating Menu</title>
 <style>
-  html,body {
-    margin: 0;
-    padding: 0;
-    background: #000;
-    overflow: hidden;
-    height: 100%;
-    width: 100%;
-    color: #fff;
-    font-family: sans-serif;
+  html,body { margin:0; padding:0; background:#000; overflow:hidden; height:100%; width:100%; }
+  #root { display:flex; justify-content:center; align-items:center; height:100vh; gap:24px; position:relative; }
+  canvas { background:#000; border-radius:8px; width:45vw; height:45vw; max-height:80vh; object-fit:contain; }
+  .menu {
+    position:absolute;
+    display:flex;
+    gap:10px;
+    padding:8px;
+    background:rgba(30,30,30,0.9);
+    border-radius:8px;
+    z-index:10;
+    pointer-events:auto;
+    user-select:none;
   }
-
-  #root {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    height: 100vh;
-    gap: 24px;
-    background: #000;
-    position: relative;
-  }
-
-  canvas {
-    background: #000;
-    border: 2px solid #111;
-    border-radius: 8px;
-    width: 80vh;
-    height: 80vh;
-    object-fit: cover;
-  }
-
-  #controls {
-    position: absolute;
-    top: 20px;
-    left: 50%;
-    transform: translateX(-50%);
-    display: flex;
-    gap: 10px;
-    z-index: 10;
-  }
-
   button {
-    padding: 10px 18px;
-    background: rgba(20,20,20,0.8);
-    color: white;
-    border: 1px solid #444;
-    border-radius: 8px;
-    font-size: 15px;
-    cursor: pointer;
-  }
-
-  button:hover {
-    background: rgba(40,40,40,0.9);
+    padding:6px 12px;
+    font-size:14px;
+    cursor:pointer;
+    background:#111;
+    color:white;
+    border:1px solid #333;
+    border-radius:6px;
   }
 </style>
 </head>
 <body>
+
 <div id="root">
   <canvas id="left"></canvas>
   <canvas id="right"></canvas>
-</div>
-
-<div id="controls">
-  <button id="startButton">Start Camera</button>
-  <button id="fullscreenButton">Fullscreen</button>
 </div>
 
 <video id="video" autoplay playsinline muted style="display:none;"></video>
@@ -77,80 +43,139 @@
 const video = document.getElementById('video');
 const left = document.getElementById('left');
 const right = document.getElementById('right');
-const startBtn = document.getElementById('startButton');
-const fullscreenBtn = document.getElementById('fullscreenButton');
+
 let stream = null;
 let raf = null;
 
-// Start camera with maximum available resolution
-startBtn.addEventListener('click', async () => {
+// ---------- CAMERA ----------
+async function startCamera() {
   try {
-    startBtn.disabled = true;
-
-    const constraints = {
-      video: {
-        facingMode: { ideal: 'environment' },
-        width: { ideal: 4096 },  // request highest possible
-        height: { ideal: 2160 }, // 4K
-        frameRate: { ideal: 60 }
-      },
-      audio: false
-    };
-
+    const constraints = { video: { facingMode:'environment', width:{ideal:4096}, height:{ideal:2160}, frameRate:{ideal:60} }, audio:false };
     stream = await navigator.mediaDevices.getUserMedia(constraints);
     video.srcObject = stream;
-    video.onloadedmetadata = () => {
-      video.play();
-      drawLoop();
-    };
-  } catch (err) {
-    alert('Camera error: ' + err.message);
-    console.error(err);
-    startBtn.disabled = false;
-  }
-});
+    video.onloadedmetadata = () => video.play();
+  } catch(e) { alert('Camera error: '+e.message); }
+}
 
-// Draw both eyes at full sharpness, square crop
+// ---------- DRAW ----------
 function drawLoop() {
+  const DPR = window.devicePixelRatio || 1;
+  const w = Math.round(left.clientWidth*DPR);
+  const h = Math.round(left.clientHeight*DPR);
+  left.width = right.width = w;
+  left.height = right.height = h;
+
   const ctxL = left.getContext('2d');
   const ctxR = right.getContext('2d');
-  const w = left.width = right.width = left.clientWidth * devicePixelRatio;
-  const h = left.height = right.height = left.clientHeight * devicePixelRatio;
 
-  ctxL.clearRect(0, 0, w, h);
-  ctxR.clearRect(0, 0, w, h);
+  ctxL.clearRect(0,0,w,h);
+  ctxR.clearRect(0,0,w,h);
 
-  const vw = video.videoWidth;
-  const vh = video.videoHeight;
-  if (!vw || !vh) { raf = requestAnimationFrame(drawLoop); return; }
+  const vw = video.videoWidth, vh = video.videoHeight;
+  if(vw && vh){
+    const size = Math.min(vw,vh);
+    const sx = (vw - size)/2, sy = (vh - size)/2;
+    ctxL.imageSmoothingEnabled = ctxR.imageSmoothingEnabled = false;
+    ctxL.drawImage(video,sx,sy,size,size,0,0,w,h);
+    ctxR.drawImage(video,sx,sy,size,size,0,0,w,h);
+  }
 
-  // Center-crop to square
-  const size = Math.min(vw, vh);
-  const sx = (vw - size) / 2;
-  const sy = (vh - size) / 2;
-
-  ctxL.drawImage(video, sx, sy, size, size, 0, 0, w, h);
-  ctxR.drawImage(video, sx, sy, size, size, 0, 0, w, h);
+  // Draw crosshairs if menu visible
+  if(menuVisible){
+    drawCrosshair(ctxL,w,h);
+    drawCrosshair(ctxR,w,h);
+  }
 
   raf = requestAnimationFrame(drawLoop);
 }
 
-// Fullscreen
-fullscreenBtn.addEventListener('click', async () => {
-  const root = document.documentElement;
-  try {
-    if (!document.fullscreenElement) {
-      await root.requestFullscreen();
-      fullscreenBtn.textContent = 'Exit Fullscreen';
-    } else {
-      await document.exitFullscreen();
-      fullscreenBtn.textContent = 'Fullscreen';
-    }
-  } catch (err) {
-    alert('Fullscreen error: ' + err.message);
-    console.error(err);
-  }
+// ---------- CROSSHAIR ----------
+function drawCrosshair(ctx,w,h){
+  const radius = crossHover ? 12 : 8;
+  ctx.strokeStyle = 'white';
+  ctx.fillStyle = crossHover ? 'white':'transparent';
+  ctx.beginPath();
+  ctx.arc(w/2,h/2,radius,0,2*Math.PI);
+  ctx.fill();
+  ctx.stroke();
+}
+
+// ---------- FULLSCREEN ----------
+function toggleFullscreen(){
+  if(!document.fullscreenElement) document.documentElement.requestFullscreen();
+  else document.exitFullscreen();
+}
+
+// ---------- MENU ----------
+let menuVisible = false;
+let menuX = window.innerWidth/2;
+let menuY = window.innerHeight/2;
+let crossHover = false;
+
+// Create dual menus
+const menuLeft = document.createElement('div');
+const menuRight = document.createElement('div');
+menuLeft.className = 'menu';
+menuRight.className = 'menu';
+
+['Start Camera','Fullscreen'].forEach(text=>{
+  const b1 = document.createElement('button');
+  b1.textContent = text;
+  b1.onclick = ()=>buttonAction(text);
+  const b2 = b1.cloneNode(true);
+  b2.onclick = ()=>buttonAction(text);
+  menuLeft.appendChild(b1);
+  menuRight.appendChild(b2);
 });
+
+document.body.appendChild(menuLeft);
+document.body.appendChild(menuRight);
+menuLeft.style.display = menuRight.style.display = 'none';
+
+function buttonAction(name){
+  if(name==='Start Camera') startCamera();
+  if(name==='Fullscreen') toggleFullscreen();
+}
+
+// ---------- GYRO TRACK ----------
+let alpha=0,beta=0,gamma=0;
+window.addEventListener('deviceorientation',e=>{
+  alpha = e.alpha||0;
+  beta = e.beta||0;
+  gamma = e.gamma||0;
+  if(menuVisible) updateMenuPosition();
+});
+
+function updateMenuPosition(){
+  // menu should stay frozen in space, so invert rotation
+  const offsetX = -gamma*3; // adjust sensitivity
+  const offsetY = beta*3;
+  menuLeft.style.left = (menuX+offsetX)+'px';
+  menuLeft.style.top = (menuY+offsetY)+'px';
+  menuRight.style.left = (menuX+offsetX+left.clientWidth+24)+'px';
+  menuRight.style.top = (menuY+offsetY)+'px';
+}
+
+// ---------- DOUBLE-TAP TO SPAWN ----------
+let lastTap = 0;
+window.addEventListener('touchstart',e=>{
+  const now = Date.now();
+  if(now-lastTap<300){
+    menuVisible = !menuVisible;
+    menuLeft.style.display = menuRight.style.display = menuVisible?'flex':'none';
+    if(menuVisible){
+      // spawn in front
+      menuX = window.innerWidth/2 - left.clientWidth/2;
+      menuY = window.innerHeight/2 - left.clientHeight/2;
+      updateMenuPosition();
+    }
+  }
+  lastTap = now;
+});
+
+// ---------- START ----------
+startCamera();
+drawLoop();
 </script>
 </body>
 </html>
