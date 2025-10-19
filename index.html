@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Dual-Eye Camera — Base Test</title>
+<title>Dual-Eye Camera — Fullscreen Test</title>
 <style>
   html,body {
     margin: 0;
@@ -26,28 +26,36 @@
   }
 
   video {
-    width: 45vw;     /* smaller to increase FOV */
-    height: auto;
+    height: 80vh;     /* square view */
+    width: 80vh;      /* make it square */
     border: 2px solid #222;
     border-radius: 8px;
     object-fit: cover;
     background: #000;
-    transform: scaleX(-1); /* mirror for goggle-like look */
   }
 
-  #startButton {
+  #controls {
     position: absolute;
-    top: 50%;
+    top: 20px;
     left: 50%;
-    transform: translate(-50%, -50%);
-    padding: 12px 20px;
-    background: #111;
-    color: white;
-    border: 0;
-    border-radius: 10px;
-    font-size: 16px;
-    cursor: pointer;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 10px;
     z-index: 10;
+  }
+
+  button {
+    padding: 10px 18px;
+    background: rgba(20,20,20,0.8);
+    color: white;
+    border: 1px solid #444;
+    border-radius: 8px;
+    font-size: 15px;
+    cursor: pointer;
+  }
+
+  button:hover {
+    background: rgba(40,40,40,0.9);
   }
 </style>
 </head>
@@ -57,17 +65,22 @@
   <video id="right" autoplay playsinline muted></video>
 </div>
 
-<button id="startButton">Start Camera</button>
+<div id="controls">
+  <button id="startButton">Start Camera</button>
+  <button id="fullscreenButton">Fullscreen</button>
+</div>
 
 <script>
 const left = document.getElementById('left');
 const right = document.getElementById('right');
-const btn = document.getElementById('startButton');
+const startBtn = document.getElementById('startButton');
+const fullscreenBtn = document.getElementById('fullscreenButton');
 let stream = null;
 
-btn.addEventListener('click', async () => {
+// Start the camera
+startBtn.addEventListener('click', async () => {
   try {
-    btn.style.display = 'none';
+    startBtn.disabled = true;
     stream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
       audio: false
@@ -77,7 +90,24 @@ btn.addEventListener('click', async () => {
   } catch (err) {
     alert('Camera error: ' + err.message);
     console.error(err);
-    btn.style.display = 'block';
+    startBtn.disabled = false;
+  }
+});
+
+// Enter fullscreen
+fullscreenBtn.addEventListener('click', async () => {
+  const root = document.documentElement;
+  try {
+    if (!document.fullscreenElement) {
+      await root.requestFullscreen();
+      fullscreenBtn.textContent = 'Exit Fullscreen';
+    } else {
+      await document.exitFullscreen();
+      fullscreenBtn.textContent = 'Fullscreen';
+    }
+  } catch (err) {
+    alert('Fullscreen error: ' + err.message);
+    console.error(err);
   }
 });
 </script>
