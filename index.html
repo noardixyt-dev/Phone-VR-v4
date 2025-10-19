@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Dual-Eye Camera — Fullscreen Test</title>
+<title>Dual-Eye VR Camera (Square View)</title>
 <style>
   html,body {
     margin: 0;
@@ -21,17 +21,18 @@
     justify-content: center;
     align-items: center;
     height: 100vh;
-    gap: 24px; /* space between eyes */
+    gap: 24px;
     background: #000;
+    position: relative;
   }
 
-  video {
-    height: 80vh;     /* square view */
-    width: 80vh;      /* make it square */
-    border: 2px solid #222;
-    border-radius: 8px;
-    object-fit: cover;
+  canvas {
     background: #000;
+    border: 2px solid #111;
+    border-radius: 8px;
+    width: 80vh;
+    height: 80vh;
+    object-fit: cover;
   }
 
   #controls {
@@ -61,8 +62,8 @@
 </head>
 <body>
 <div id="root">
-  <video id="left" autoplay playsinline muted></video>
-  <video id="right" autoplay playsinline muted></video>
+  <canvas id="left"></canvas>
+  <canvas id="right"></canvas>
 </div>
 
 <div id="controls">
@@ -70,14 +71,18 @@
   <button id="fullscreenButton">Fullscreen</button>
 </div>
 
+<video id="video" autoplay playsinline muted style="display:none;"></video>
+
 <script>
+const video = document.getElementById('video');
 const left = document.getElementById('left');
 const right = document.getElementById('right');
 const startBtn = document.getElementById('startButton');
 const fullscreenBtn = document.getElementById('fullscreenButton');
 let stream = null;
+let raf = null;
 
-// Start the camera
+// Camera startup
 startBtn.addEventListener('click', async () => {
   try {
     startBtn.disabled = true;
@@ -85,8 +90,11 @@ startBtn.addEventListener('click', async () => {
       video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
       audio: false
     });
-    left.srcObject = stream;
-    right.srcObject = stream;
+    video.srcObject = stream;
+    video.onloadedmetadata = () => {
+      video.play();
+      drawLoop();
+    };
   } catch (err) {
     alert('Camera error: ' + err.message);
     console.error(err);
@@ -94,7 +102,32 @@ startBtn.addEventListener('click', async () => {
   }
 });
 
-// Enter fullscreen
+// Draw the camera feed into both canvases as perfect squares
+function drawLoop() {
+  const ctxL = left.getContext('2d');
+  const ctxR = right.getContext('2d');
+  const w = left.width = right.width = left.clientWidth;
+  const h = left.height = right.height = left.clientHeight;
+
+  ctxL.clearRect(0, 0, w, h);
+  ctxR.clearRect(0, 0, w, h);
+
+  const vw = video.videoWidth;
+  const vh = video.videoHeight;
+  if (!vw || !vh) { raf = requestAnimationFrame(drawLoop); return; }
+
+  // Force the center crop to make it square
+  const size = Math.min(vw, vh);
+  const sx = (vw - size) / 2;
+  const sy = (vh - size) / 2;
+
+  ctxL.drawImage(video, sx, sy, size, size, 0, 0, w, h);
+  ctxR.drawImage(video, sx, sy, size, size, 0, 0, w, h);
+
+  raf = requestAnimationFrame(drawLoop);
+}
+
+// Fullscreen
 fullscreenBtn.addEventListener('click', async () => {
   const root = document.documentElement;
   try {
