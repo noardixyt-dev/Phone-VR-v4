@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Dual-Eye VR Camera (Square View)</title>
+<title>Dual-Eye VR Camera — High Resolution</title>
 <style>
   html,body {
     margin: 0;
@@ -82,14 +82,22 @@ const fullscreenBtn = document.getElementById('fullscreenButton');
 let stream = null;
 let raf = null;
 
-// Camera startup
+// Start camera with maximum available resolution
 startBtn.addEventListener('click', async () => {
   try {
     startBtn.disabled = true;
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
+
+    const constraints = {
+      video: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 4096 },  // request highest possible
+        height: { ideal: 2160 }, // 4K
+        frameRate: { ideal: 60 }
+      },
       audio: false
-    });
+    };
+
+    stream = await navigator.mediaDevices.getUserMedia(constraints);
     video.srcObject = stream;
     video.onloadedmetadata = () => {
       video.play();
@@ -102,12 +110,12 @@ startBtn.addEventListener('click', async () => {
   }
 });
 
-// Draw the camera feed into both canvases as perfect squares
+// Draw both eyes at full sharpness, square crop
 function drawLoop() {
   const ctxL = left.getContext('2d');
   const ctxR = right.getContext('2d');
-  const w = left.width = right.width = left.clientWidth;
-  const h = left.height = right.height = left.clientHeight;
+  const w = left.width = right.width = left.clientWidth * devicePixelRatio;
+  const h = left.height = right.height = left.clientHeight * devicePixelRatio;
 
   ctxL.clearRect(0, 0, w, h);
   ctxR.clearRect(0, 0, w, h);
@@ -116,7 +124,7 @@ function drawLoop() {
   const vh = video.videoHeight;
   if (!vw || !vh) { raf = requestAnimationFrame(drawLoop); return; }
 
-  // Force the center crop to make it square
+  // Center-crop to square
   const size = Math.min(vw, vh);
   const sx = (vw - size) / 2;
   const sy = (vh - size) / 2;
