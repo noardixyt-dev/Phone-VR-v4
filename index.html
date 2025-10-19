@@ -24,24 +24,27 @@ button{padding:5px 10px;font-size:13px;cursor:pointer;background:#111;color:whit
 const video=document.getElementById('video');
 const left=document.getElementById('left');
 const right=document.getElementById('right');
-
-let stream=null,raf=null;
-let menuVisible=false;
-let crossHover=false;
+let stream=null, raf=null;
 
 // ---------- WORLD-FIXED MENU ----------
-let menuAlpha=0,menuBeta=0; // menu world orientation
-let baseX=0,baseY=0;        // menu initial canvas pos
-const menu=document.createElement('div');
-menu.className='menu';
+let menuVisible=false;
+let spawnAlpha=0, spawnBeta=0; // world angles
+const menuLeft=document.createElement('div');
+menuLeft.className='menu';
+const menuRight=document.createElement('div');
+menuRight.className='menu';
 ['Start Camera','Fullscreen'].forEach(t=>{
-  const b=document.createElement('button');
-  b.textContent=t;
-  b.onclick=()=>{if(t==='Start Camera')startCamera();if(t==='Fullscreen')toggleFullscreen();}
-  menu.appendChild(b);
+  const bL=document.createElement('button');
+  const bR=document.createElement('button');
+  bL.textContent=bR.textContent=t;
+  bL.onclick=bR.onclick=()=>{if(t==='Start Camera')startCamera();if(t==='Fullscreen')toggleFullscreen();}
+  menuLeft.appendChild(bL);
+  menuRight.appendChild(bR);
 });
-document.body.appendChild(menu);
-menu.style.display='none';
+document.body.appendChild(menuLeft);
+document.body.appendChild(menuRight);
+menuLeft.style.display='none';
+menuRight.style.display='none';
 
 // ---------- FULLSCREEN ----------
 function toggleFullscreen(){if(!document.fullscreenElement)document.documentElement.requestFullscreen();else document.exitFullscreen();}
@@ -52,7 +55,7 @@ async function startCamera(){
     const constraints={video:{facingMode:'environment',width:{ideal:4096},height:{ideal:2160},frameRate:{ideal:60}},audio:false};
     stream=await navigator.mediaDevices.getUserMedia(constraints);
     video.srcObject=stream;
-    video.onloadedmetadata=()=>video.play();
+    await video.play();
   }catch(e){alert('Camera error: '+e.message);}
 }
 
@@ -66,6 +69,14 @@ function resizeCanvases(){
 }
 window.addEventListener('resize',resizeCanvases);
 resizeCanvases();
+
+// ---------- DEVICE ORIENTATION ----------
+let alpha=0,beta=0,gamma=0;
+window.addEventListener('deviceorientation',e=>{
+  alpha=e.alpha||0;
+  beta=e.beta||0;
+  gamma=e.gamma||0;
+});
 
 // ---------- DRAW LOOP ----------
 function drawLoop(){
@@ -85,8 +96,7 @@ function drawLoop(){
   }
 
   if(menuVisible){
-    drawMenu(ctxL,w,h);
-    drawMenu(ctxR,w,h);
+    updateMenuPosition();
     drawCrosshair(ctxL,w,h);
     drawCrosshair(ctxR,w,h);
   }
@@ -96,31 +106,34 @@ function drawLoop(){
 
 // ---------- CROSSHAIR ----------
 function drawCrosshair(ctx,w,h){
-  const radius=crossHover?12:8;
+  const radius=8;
   ctx.strokeStyle='white';
-  ctx.fillStyle=crossHover?'white':'transparent';
+  ctx.fillStyle='transparent';
   ctx.beginPath();
   ctx.arc(w/2,h/2,radius,0,2*Math.PI);
   ctx.fill();
   ctx.stroke();
 }
 
-// ---------- DEVICE ORIENTATION ----------
-let alpha=0,beta=0,gamma=0;
-window.addEventListener('deviceorientation',e=>{
-  alpha=e.alpha||0;
-  beta=e.beta||0;
-  gamma=e.gamma||0;
-  if(menuVisible) updateMenuPosition();
-});
-
-// ---------- UPDATE MENU (WORLD-FIXED) ----------
+// ---------- MENU POSITIONING ----------
+let baseX=0, baseY=0;
 function updateMenuPosition(){
-  const sensitivity=3;
-  const dx=(menuAlpha-alpha)*sensitivity;
-  const dy=(menuBeta-beta)*sensitivity;
-  menu.style.left=Math.min(Math.max(baseX+dx,0),left.clientWidth-50)+'px';
-  menu.style.top=Math.min(Math.max(baseY+dy,0),left.clientHeight-50)+'px';
+  const sensitivity=3; // pixels per degree
+  const dx=(spawnAlpha - alpha)*sensitivity;
+  const dy=(spawnBeta - beta)*sensitivity;
+
+  const wLeft=left.clientWidth, hLeft=left.clientHeight;
+  const wRight=right.clientWidth, hRight=right.clientHeight;
+
+  // Compute menu per eye and clip to viewport
+  menuLeft.style.left=Math.min(Math.max(baseX+dx,0),wLeft-menuLeft.offsetWidth)+'px';
+  menuLeft.style.top=Math.min(Math.max(baseY+dy,0),hLeft-menuLeft.offsetHeight)+'px';
+
+  menuRight.style.left=Math.min(Math.max(baseX+dx,0),wRight-menuRight.offsetWidth)+'px';
+  menuRight.style.top=Math.min(Math.max(baseY+dy,0),hRight-menuRight.offsetHeight)+'px';
+
+  menuLeft.style.display='flex';
+  menuRight.style.display='flex';
 }
 
 // ---------- DOUBLE-TAP SPAWN ----------
@@ -129,13 +142,15 @@ window.addEventListener('touchstart',e=>{
   const now=Date.now();
   if(now-lastTap<300){
     menuVisible=!menuVisible;
-    menu.style.display=menuVisible?'flex':'none';
     if(menuVisible){
-      menuAlpha=alpha;
-      menuBeta=beta;
-      baseX=left.clientWidth/2-50;
-      baseY=left.clientHeight/2-20;
+      spawnAlpha=alpha;
+      spawnBeta=beta;
+      baseX=left.clientWidth/2 - menuLeft.offsetWidth/2;
+      baseY=left.clientHeight/2 - menuLeft.offsetHeight/2;
       updateMenuPosition();
+    }else{
+      menuLeft.style.display='none';
+      menuRight.style.display='none';
     }
   }
   lastTap=now;
