@@ -3,105 +3,100 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>VR Dual Camera — Fixed Landscape</title>
+<title>VR Dual Camera HUD</title>
 <style>
-  html, body { margin:0; padding:0; overflow:hidden; height:100%; width:100%; background:#000; }
-  #root { display:flex; justify-content:center; align-items:center; height:100vh; gap:24px; position:relative; }
-  canvas { background:#000; border-radius:8px; object-fit:contain; }
-  .menu {
-    position:absolute;
-    display:flex;
-    gap:8px;
-    padding:6px;
-    background:rgba(30,30,30,0.9);
-    border-radius:6px;
-    z-index:10;
-    pointer-events:auto;
-    user-select:none;
-  }
-  button {
-    padding:5px 10px;
-    font-size:13px;
-    cursor:pointer;
-    background:#111;
-    color:white;
-    border:1px solid #333;
-    border-radius:4px;
-  }
+html,body{margin:0;padding:0;width:100%;height:100%;background:#000;overflow:hidden;}
+#root{display:flex;justify-content:center;align-items:center;height:100vh;gap:24px;position:relative;}
+canvas{background:#000;border-radius:8px;object-fit:contain;}
+.menu{position:absolute;display:flex;gap:6px;padding:6px;background:rgba(30,30,30,0.9);border-radius:6px;z-index:10;pointer-events:auto;user-select:none;}
+button{padding:5px 10px;font-size:13px;cursor:pointer;background:#111;color:white;border:1px solid #333;border-radius:4px;}
 </style>
 </head>
 <body>
-
 <div id="root">
   <canvas id="left"></canvas>
   <canvas id="right"></canvas>
 </div>
 
-<video id="video" autoplay playsinline muted style="display:none;"></video>
+<video id="video" autoplay playsinline muted style="display:none"></video>
 
 <script>
-const video = document.getElementById('video');
-const left = document.getElementById('left');
-const right = document.getElementById('right');
+const video=document.getElementById('video');
+const left=document.getElementById('left');
+const right=document.getElementById('right');
 
-let stream=null;
-let raf=null;
+let stream=null,raf=null;
 let menuVisible=false;
-let menuX=0, menuY=0;
+let crossHover=false;
+
+// ---------- WORLD-FIXED MENU ----------
+let menuAlpha=0,menuBeta=0; // menu world orientation
+let baseX=0,baseY=0;        // menu initial canvas pos
+const menu=document.createElement('div');
+menu.className='menu';
+['Start Camera','Fullscreen'].forEach(t=>{
+  const b=document.createElement('button');
+  b.textContent=t;
+  b.onclick=()=>{if(t==='Start Camera')startCamera();if(t==='Fullscreen')toggleFullscreen();}
+  menu.appendChild(b);
+});
+document.body.appendChild(menu);
+menu.style.display='none';
+
+// ---------- FULLSCREEN ----------
+function toggleFullscreen(){if(!document.fullscreenElement)document.documentElement.requestFullscreen();else document.exitFullscreen();}
 
 // ---------- START CAMERA ----------
-async function startCamera() {
-  try {
-    const constraints = {
-      video: { facingMode:'environment', width:{ideal:4096}, height:{ideal:2160}, frameRate:{ideal:60} },
-      audio:false
-    };
-    stream = await navigator.mediaDevices.getUserMedia(constraints);
-    video.srcObject = stream;
-    video.onloadedmetadata = ()=>video.play();
-  } catch(e){ alert('Camera error: '+e.message); }
+async function startCamera(){
+  try{
+    const constraints={video:{facingMode:'environment',width:{ideal:4096},height:{ideal:2160},frameRate:{ideal:60}},audio:false};
+    stream=await navigator.mediaDevices.getUserMedia(constraints);
+    video.srcObject=stream;
+    video.onloadedmetadata=()=>video.play();
+  }catch(e){alert('Camera error: '+e.message);}
 }
 
-// ---------- CANVAS & DRAW LOOP ----------
+// ---------- CANVAS ----------
 function resizeCanvases(){
-  const size = Math.min(window.innerWidth/2, window.innerHeight);
-  left.style.width = left.style.height = right.style.width = right.style.height = size+'px';
-  left.width = right.width = size * (window.devicePixelRatio||1);
-  left.height = right.height = size * (window.devicePixelRatio||1);
+  const size=Math.min(window.innerWidth/2,window.innerHeight);
+  [left,right].forEach(c=>{
+    c.style.width=c.style.height=size+'px';
+    c.width=c.height=size*(window.devicePixelRatio||1);
+  });
 }
-window.addEventListener('resize', resizeCanvases);
+window.addEventListener('resize',resizeCanvases);
 resizeCanvases();
 
+// ---------- DRAW LOOP ----------
 function drawLoop(){
-  const w = left.width;
-  const h = left.height;
-  const ctxL = left.getContext('2d');
-  const ctxR = right.getContext('2d');
+  const w=left.width,h=left.height;
+  const ctxL=left.getContext('2d');
+  const ctxR=right.getContext('2d');
   ctxL.clearRect(0,0,w,h);
   ctxR.clearRect(0,0,w,h);
 
   if(video.videoWidth && video.videoHeight){
-    const size = Math.min(video.videoWidth, video.videoHeight);
-    const sx = (video.videoWidth-size)/2;
-    const sy = (video.videoHeight-size)/2;
-
-    ctxL.imageSmoothingEnabled = ctxR.imageSmoothingEnabled = false;
+    const size=Math.min(video.videoWidth,video.videoHeight);
+    const sx=(video.videoWidth-size)/2;
+    const sy=(video.videoHeight-size)/2;
+    ctxL.imageSmoothingEnabled=ctxR.imageSmoothingEnabled=false;
     ctxL.drawImage(video,sx,sy,size,size,0,0,w,h);
     ctxR.drawImage(video,sx,sy,size,size,0,0,w,h);
   }
 
   if(menuVisible){
+    drawMenu(ctxL,w,h);
+    drawMenu(ctxR,w,h);
     drawCrosshair(ctxL,w,h);
     drawCrosshair(ctxR,w,h);
   }
 
-  raf = requestAnimationFrame(drawLoop);
+  raf=requestAnimationFrame(drawLoop);
 }
 
 // ---------- CROSSHAIR ----------
-let crossHover=false;
 function drawCrosshair(ctx,w,h){
-  const radius = crossHover?12:8;
+  const radius=crossHover?12:8;
   ctx.strokeStyle='white';
   ctx.fillStyle=crossHover?'white':'transparent';
   ctx.beginPath();
@@ -110,36 +105,7 @@ function drawCrosshair(ctx,w,h){
   ctx.stroke();
 }
 
-// ---------- FULLSCREEN ----------
-function toggleFullscreen(){
-  if(!document.fullscreenElement) document.documentElement.requestFullscreen();
-  else document.exitFullscreen();
-}
-
-// ---------- MENU ----------
-const menuLeft=document.createElement('div');
-const menuRight=document.createElement('div');
-menuLeft.className=menuRight.className='menu';
-
-['Start Camera','Fullscreen'].forEach(text=>{
-  const b1=document.createElement('button');
-  b1.textContent=text;
-  b1.onclick=()=>buttonAction(text);
-  const b2=b1.cloneNode(true);
-  b2.onclick=()=>buttonAction(text);
-  menuLeft.appendChild(b1);
-  menuRight.appendChild(b2);
-});
-document.body.appendChild(menuLeft);
-document.body.appendChild(menuRight);
-menuLeft.style.display=menuRight.style.display='none';
-
-function buttonAction(name){
-  if(name==='Start Camera') startCamera();
-  if(name==='Fullscreen') toggleFullscreen();
-}
-
-// ---------- GYRO TRACK ----------
+// ---------- DEVICE ORIENTATION ----------
 let alpha=0,beta=0,gamma=0;
 window.addEventListener('deviceorientation',e=>{
   alpha=e.alpha||0;
@@ -148,15 +114,13 @@ window.addEventListener('deviceorientation',e=>{
   if(menuVisible) updateMenuPosition();
 });
 
-// Landscape mapping fix: rotate axes
+// ---------- UPDATE MENU (WORLD-FIXED) ----------
 function updateMenuPosition(){
   const sensitivity=3;
-  const offsetX = -gamma*sensitivity; // tilt right -> menu left
-  const offsetY = beta*sensitivity;    // tilt up -> menu down
-  menuLeft.style.left = Math.min(Math.max(menuX+offsetX,0),left.clientWidth-50)+'px';
-  menuLeft.style.top = Math.min(Math.max(menuY+offsetY,0),left.clientHeight-50)+'px';
-  menuRight.style.left = (parseInt(menuLeft.style.left)+left.clientWidth+24)+'px';
-  menuRight.style.top = menuLeft.style.top;
+  const dx=(menuAlpha-alpha)*sensitivity;
+  const dy=(menuBeta-beta)*sensitivity;
+  menu.style.left=Math.min(Math.max(baseX+dx,0),left.clientWidth-50)+'px';
+  menu.style.top=Math.min(Math.max(baseY+dy,0),left.clientHeight-50)+'px';
 }
 
 // ---------- DOUBLE-TAP SPAWN ----------
@@ -165,10 +129,12 @@ window.addEventListener('touchstart',e=>{
   const now=Date.now();
   if(now-lastTap<300){
     menuVisible=!menuVisible;
-    menuLeft.style.display=menuRight.style.display=menuVisible?'flex':'none';
+    menu.style.display=menuVisible?'flex':'none';
     if(menuVisible){
-      menuX=left.clientWidth/2 - 50;
-      menuY=left.clientHeight/2 - 20;
+      menuAlpha=alpha;
+      menuBeta=beta;
+      baseX=left.clientWidth/2-50;
+      baseY=left.clientHeight/2-20;
       updateMenuPosition();
     }
   }
