@@ -23,19 +23,16 @@ canvas{background:#000;border-radius:8px;}
 const video=document.getElementById('video');
 const leftCanvas=document.getElementById('left');
 const rightCanvas=document.getElementById('right');
-
 let stream=null,rafId=null,zoom=1,eyeGap=20;
 let menuVisible=false,menuAngle=0,deviceYaw=0,devicePitch=0,lastTap=0,alwaysShowCrosshair=false;
 const rotCanvas=document.createElement('canvas');
 const rotCtx=rotCanvas.getContext('2d');
-
 const menuBox=document.createElement('div');menuBox.className='menuBox';
 const startBtn=document.createElement('button');startBtn.className='menuBtn';startBtn.textContent='Start Camera';
 const fsBtn=document.createElement('button');fsBtn.className='menuBtn';fsBtn.textContent='Fullscreen';
 const zoomSlider=document.createElement('input');zoomSlider.type='range';zoomSlider.min='1';zoomSlider.max='2';zoomSlider.step='0.01';zoomSlider.value='1';zoomSlider.className='menuSlider';
 menuBox.appendChild(startBtn);menuBox.appendChild(fsBtn);menuBox.appendChild(zoomSlider);
 document.body.appendChild(menuBox);menuBox.style.display='none';
-
 async function startCamera(){
   if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}
   try{
@@ -46,34 +43,25 @@ async function startCamera(){
     resizeCanvases();
   }catch(e){alert('Camera error: '+e.message);}
 }
-
 function toggleFullscreen(){
   if(!document.fullscreenElement)document.body.requestFullscreen?.();
   else document.exitFullscreen?.();
 }
-
 startBtn.onclick=startCamera;
 fsBtn.onclick=toggleFullscreen;
 zoomSlider.oninput=e=>{zoom=parseFloat(e.target.value);};
-
 function resizeCanvases(){
   const dpr=window.devicePixelRatio||1;
   const w=window.innerWidth,h=window.innerHeight;
   const scale=0.85;
-  const eyeW=Math.floor(w*scale/2),eyeH=Math.floor(h*scale);
-  [leftCanvas,rightCanvas].forEach(c=>{c.width=c.height=Math.floor(eyeW*dpr);c.style.width=c.style.height=eyeW+'px';});
-  leftCanvas.style.left=`calc(50% - ${eyeW+eyeGap/2}px)`;
+  const eyeSize=Math.min(w*scale/2,h*scale);
+  [leftCanvas,rightCanvas].forEach(c=>{c.width=c.height=Math.floor(eyeSize*dpr);c.style.width=c.style.height=eyeSize+'px';});
+  leftCanvas.style.left=`calc(50% - ${eyeSize+eyeGap/2}px)`;
   rightCanvas.style.left=`calc(50% + ${eyeGap/2}px)`;
-  leftCanvas.style.top=rightCanvas.style.top=`calc(50% - ${eyeH/2}px)`;
+  leftCanvas.style.top=rightCanvas.style.top=`calc(50% - ${eyeSize/2}px)`;
 }
-window.addEventListener('resize',resizeCanvases);
-resizeCanvases();
-
-window.addEventListener('deviceorientation',e=>{
-  deviceYaw=e.alpha||0;
-  devicePitch=e.beta||0;
-});
-
+window.addEventListener('resize',resizeCanvases);resizeCanvases();
+window.addEventListener('deviceorientation',e=>{deviceYaw=e.alpha||0;devicePitch=e.beta||0;});
 window.addEventListener('touchstart',e=>{
   const now=Date.now();
   if(now-lastTap<300){
@@ -83,29 +71,23 @@ window.addEventListener('touchstart',e=>{
   }
   lastTap=now;
 });
-
 function ensureRotated(){
   if(video.videoHeight<=video.videoWidth)return {src:video,w:video.videoWidth,h:video.videoHeight};
   if(rotCanvas.width!==video.videoHeight||rotCanvas.height!==video.videoWidth){rotCanvas.width=video.videoHeight;rotCanvas.height=video.videoWidth;}
   rotCtx.save();rotCtx.clearRect(0,0,rotCanvas.width,rotCanvas.height);rotCtx.translate(rotCanvas.width,0);rotCtx.rotate(Math.PI/2);rotCtx.drawImage(video,0,0,video.videoWidth,video.videoHeight);rotCtx.restore();
   return {src:rotCanvas,w:rotCanvas.width,h:rotCanvas.height};
 }
-
 function drawCrosshair(ctx){
   if(!menuVisible&&!alwaysShowCrosshair)return;
   const cx=ctx.canvas.width/2,cy=ctx.canvas.height/2;
-  ctx.strokeStyle='white';
-  ctx.lineWidth=2;
-  ctx.beginPath();
-  ctx.arc(cx,cy,8,0,2*Math.PI);
-  ctx.stroke();
+  ctx.strokeStyle='white';ctx.lineWidth=2;ctx.beginPath();ctx.arc(cx,cy,8,0,2*Math.PI);ctx.stroke();
 }
-
 function drawLoop(){
   const ctxL=leftCanvas.getContext('2d'),ctxR=rightCanvas.getContext('2d');
   if(!video.videoWidth||!video.videoHeight){rafId=requestAnimationFrame(drawLoop);return;}
   const {src,w,h}=ensureRotated();
-  [ctxL,ctxR].forEach(ctx=>{ctx.clearRect(0,0,ctx.canvas.width,ctx.canvas.height);
+  [ctxL,ctxR].forEach(ctx=>{
+    ctx.clearRect(0,0,ctx.canvas.width,ctx.canvas.height);
     const sw=w/zoom,sh=h/zoom;
     const sx=(w-sw)/2,sy=(h-sh)/2;
     ctx.drawImage(src,sx,sy,sw,sh,0,0,ctx.canvas.width,ctx.canvas.height);
