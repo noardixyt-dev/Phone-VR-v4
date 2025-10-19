@@ -1,32 +1,32 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>VR Dual Camera — Floating Menu</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VR Dual Camera — Fixed Landscape</title>
 <style>
-  html,body { margin:0; padding:0; background:#000; overflow:hidden; height:100%; width:100%; }
+  html, body { margin:0; padding:0; overflow:hidden; height:100%; width:100%; background:#000; }
   #root { display:flex; justify-content:center; align-items:center; height:100vh; gap:24px; position:relative; }
-  canvas { background:#000; border-radius:8px; width:45vw; height:45vw; max-height:80vh; object-fit:contain; }
+  canvas { background:#000; border-radius:8px; object-fit:contain; }
   .menu {
     position:absolute;
     display:flex;
-    gap:10px;
-    padding:8px;
+    gap:8px;
+    padding:6px;
     background:rgba(30,30,30,0.9);
-    border-radius:8px;
+    border-radius:6px;
     z-index:10;
     pointer-events:auto;
     user-select:none;
   }
   button {
-    padding:6px 12px;
-    font-size:14px;
+    padding:5px 10px;
+    font-size:13px;
     cursor:pointer;
     background:#111;
     color:white;
     border:1px solid #333;
-    border-radius:6px;
+    border-radius:4px;
   }
 </style>
 </head>
@@ -44,43 +44,52 @@ const video = document.getElementById('video');
 const left = document.getElementById('left');
 const right = document.getElementById('right');
 
-let stream = null;
-let raf = null;
+let stream=null;
+let raf=null;
+let menuVisible=false;
+let menuX=0, menuY=0;
 
-// ---------- CAMERA ----------
+// ---------- START CAMERA ----------
 async function startCamera() {
   try {
-    const constraints = { video: { facingMode:'environment', width:{ideal:4096}, height:{ideal:2160}, frameRate:{ideal:60} }, audio:false };
+    const constraints = {
+      video: { facingMode:'environment', width:{ideal:4096}, height:{ideal:2160}, frameRate:{ideal:60} },
+      audio:false
+    };
     stream = await navigator.mediaDevices.getUserMedia(constraints);
     video.srcObject = stream;
-    video.onloadedmetadata = () => video.play();
-  } catch(e) { alert('Camera error: '+e.message); }
+    video.onloadedmetadata = ()=>video.play();
+  } catch(e){ alert('Camera error: '+e.message); }
 }
 
-// ---------- DRAW ----------
-function drawLoop() {
-  const DPR = window.devicePixelRatio || 1;
-  const w = Math.round(left.clientWidth*DPR);
-  const h = Math.round(left.clientHeight*DPR);
-  left.width = right.width = w;
-  left.height = right.height = h;
+// ---------- CANVAS & DRAW LOOP ----------
+function resizeCanvases(){
+  const size = Math.min(window.innerWidth/2, window.innerHeight);
+  left.style.width = left.style.height = right.style.width = right.style.height = size+'px';
+  left.width = right.width = size * (window.devicePixelRatio||1);
+  left.height = right.height = size * (window.devicePixelRatio||1);
+}
+window.addEventListener('resize', resizeCanvases);
+resizeCanvases();
 
+function drawLoop(){
+  const w = left.width;
+  const h = left.height;
   const ctxL = left.getContext('2d');
   const ctxR = right.getContext('2d');
-
   ctxL.clearRect(0,0,w,h);
   ctxR.clearRect(0,0,w,h);
 
-  const vw = video.videoWidth, vh = video.videoHeight;
-  if(vw && vh){
-    const size = Math.min(vw,vh);
-    const sx = (vw - size)/2, sy = (vh - size)/2;
+  if(video.videoWidth && video.videoHeight){
+    const size = Math.min(video.videoWidth, video.videoHeight);
+    const sx = (video.videoWidth-size)/2;
+    const sy = (video.videoHeight-size)/2;
+
     ctxL.imageSmoothingEnabled = ctxR.imageSmoothingEnabled = false;
     ctxL.drawImage(video,sx,sy,size,size,0,0,w,h);
     ctxR.drawImage(video,sx,sy,size,size,0,0,w,h);
   }
 
-  // Draw crosshairs if menu visible
   if(menuVisible){
     drawCrosshair(ctxL,w,h);
     drawCrosshair(ctxR,w,h);
@@ -90,10 +99,11 @@ function drawLoop() {
 }
 
 // ---------- CROSSHAIR ----------
+let crossHover=false;
 function drawCrosshair(ctx,w,h){
-  const radius = crossHover ? 12 : 8;
-  ctx.strokeStyle = 'white';
-  ctx.fillStyle = crossHover ? 'white':'transparent';
+  const radius = crossHover?12:8;
+  ctx.strokeStyle='white';
+  ctx.fillStyle=crossHover?'white':'transparent';
   ctx.beginPath();
   ctx.arc(w/2,h/2,radius,0,2*Math.PI);
   ctx.fill();
@@ -107,30 +117,22 @@ function toggleFullscreen(){
 }
 
 // ---------- MENU ----------
-let menuVisible = false;
-let menuX = window.innerWidth/2;
-let menuY = window.innerHeight/2;
-let crossHover = false;
-
-// Create dual menus
-const menuLeft = document.createElement('div');
-const menuRight = document.createElement('div');
-menuLeft.className = 'menu';
-menuRight.className = 'menu';
+const menuLeft=document.createElement('div');
+const menuRight=document.createElement('div');
+menuLeft.className=menuRight.className='menu';
 
 ['Start Camera','Fullscreen'].forEach(text=>{
-  const b1 = document.createElement('button');
-  b1.textContent = text;
-  b1.onclick = ()=>buttonAction(text);
-  const b2 = b1.cloneNode(true);
-  b2.onclick = ()=>buttonAction(text);
+  const b1=document.createElement('button');
+  b1.textContent=text;
+  b1.onclick=()=>buttonAction(text);
+  const b2=b1.cloneNode(true);
+  b2.onclick=()=>buttonAction(text);
   menuLeft.appendChild(b1);
   menuRight.appendChild(b2);
 });
-
 document.body.appendChild(menuLeft);
 document.body.appendChild(menuRight);
-menuLeft.style.display = menuRight.style.display = 'none';
+menuLeft.style.display=menuRight.style.display='none';
 
 function buttonAction(name){
   if(name==='Start Camera') startCamera();
@@ -140,37 +142,37 @@ function buttonAction(name){
 // ---------- GYRO TRACK ----------
 let alpha=0,beta=0,gamma=0;
 window.addEventListener('deviceorientation',e=>{
-  alpha = e.alpha||0;
-  beta = e.beta||0;
-  gamma = e.gamma||0;
+  alpha=e.alpha||0;
+  beta=e.beta||0;
+  gamma=e.gamma||0;
   if(menuVisible) updateMenuPosition();
 });
 
+// Landscape mapping fix: rotate axes
 function updateMenuPosition(){
-  // menu should stay frozen in space, so invert rotation
-  const offsetX = -gamma*3; // adjust sensitivity
-  const offsetY = beta*3;
-  menuLeft.style.left = (menuX+offsetX)+'px';
-  menuLeft.style.top = (menuY+offsetY)+'px';
-  menuRight.style.left = (menuX+offsetX+left.clientWidth+24)+'px';
-  menuRight.style.top = (menuY+offsetY)+'px';
+  const sensitivity=3;
+  const offsetX = -gamma*sensitivity; // tilt right -> menu left
+  const offsetY = beta*sensitivity;    // tilt up -> menu down
+  menuLeft.style.left = Math.min(Math.max(menuX+offsetX,0),left.clientWidth-50)+'px';
+  menuLeft.style.top = Math.min(Math.max(menuY+offsetY,0),left.clientHeight-50)+'px';
+  menuRight.style.left = (parseInt(menuLeft.style.left)+left.clientWidth+24)+'px';
+  menuRight.style.top = menuLeft.style.top;
 }
 
-// ---------- DOUBLE-TAP TO SPAWN ----------
-let lastTap = 0;
+// ---------- DOUBLE-TAP SPAWN ----------
+let lastTap=0;
 window.addEventListener('touchstart',e=>{
-  const now = Date.now();
+  const now=Date.now();
   if(now-lastTap<300){
-    menuVisible = !menuVisible;
-    menuLeft.style.display = menuRight.style.display = menuVisible?'flex':'none';
+    menuVisible=!menuVisible;
+    menuLeft.style.display=menuRight.style.display=menuVisible?'flex':'none';
     if(menuVisible){
-      // spawn in front
-      menuX = window.innerWidth/2 - left.clientWidth/2;
-      menuY = window.innerHeight/2 - left.clientHeight/2;
+      menuX=left.clientWidth/2 - 50;
+      menuY=left.clientHeight/2 - 20;
       updateMenuPosition();
     }
   }
-  lastTap = now;
+  lastTap=now;
 });
 
 // ---------- START ----------
