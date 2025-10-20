@@ -28,9 +28,9 @@
 
   .eye-container {
     position: relative;
-    width: 45%;        /* bigger for more FOV */
+    width: 45%;        /* default width */
     aspect-ratio: 1/1;
-    margin: 0 8px;
+    margin: 0 5px;     /* base gap will be updated dynamically */
     overflow: hidden;
     background: #000;
     border: 1px solid #222;
@@ -39,7 +39,7 @@
   .eye-container video {
     width: 100%;
     height: 100%;
-    object-fit: cover;  /* zoom 16:9 video to fill square vertically, sides cropped */
+    object-fit: cover;
   }
 
   .menu {
@@ -54,7 +54,7 @@
     font-size: 18px;
     color: #000;
     pointer-events: none;
-    visibility: visible; /* always rendered */
+    visibility: visible;
   }
 
   #fullscreen-btn, #scale-slider {
@@ -121,6 +121,10 @@ let menuPos = {xL:0, yL:0, xR:0, yR:0};
 const offsetMultiplier = 1.5;
 const smoothing = 0.1;
 
+// Base gap for eyes
+const baseGap = 10;  // pixels at default width
+const defaultWidth = 45; // default slider value (%)
+
 // Start camera automatically
 async function startCamera() {
   try {
@@ -146,12 +150,23 @@ fullscreenBtn.addEventListener('click', () => {
   else document.documentElement.requestFullscreen();
 });
 
-// Eye scale slider
-scaleSlider.addEventListener('input', () => {
+// Eye scale slider with dynamic gap
+function updateEyeScaleAndGap() {
   const scale = scaleSlider.value + '%';
   leftContainer.style.width = scale;
   rightContainer.style.width = scale;
-});
+
+  const dynamicGap = baseGap * (scaleSlider.value / defaultWidth);
+  leftContainer.style.marginLeft = dynamicGap/2 + "px";
+  leftContainer.style.marginRight = dynamicGap/2 + "px";
+  rightContainer.style.marginLeft = dynamicGap/2 + "px";
+  rightContainer.style.marginRight = dynamicGap/2 + "px";
+}
+
+// Initialize gap
+updateEyeScaleAndGap();
+
+scaleSlider.addEventListener('input', updateEyeScaleAndGap);
 
 // Device orientation
 window.addEventListener('deviceorientation', (event) => {
@@ -190,7 +205,6 @@ function updateMenuPosition() {
   let yawOffset = -(((menuYaw - currentYaw + 540) % 360) - 180) * offsetMultiplier;
   let pitchOffset = -(menuPitch - currentPitch) * offsetMultiplier;
 
-  // Always render menu; it can go outside container
   const lRect = leftContainer.getBoundingClientRect();
   const rRect = rightContainer.getBoundingClientRect();
 
@@ -199,6 +213,7 @@ function updateMenuPosition() {
   let targetXR = (rRect.width/2) + (yawOffset/(fov/2))*(rRect.width/2) - menuRight.offsetWidth/2;
   let targetYR = (rRect.height/2) + (pitchOffset/(vFov/2))*(rRect.height/2) - menuRight.offsetHeight/2;
 
+  // Smooth movement
   menuPos.xL = lerp(menuPos.xL, targetXL, smoothing);
   menuPos.yL = lerp(menuPos.yL, targetYL, smoothing);
   menuPos.xR = lerp(menuPos.xR, targetXR, smoothing);
