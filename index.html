@@ -1,78 +1,87 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AR Mixed Reality</title>
-  <style>
-    body { margin: 0; overflow: hidden; }
-    canvas { position: absolute; top: 0; left: 0; }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Phone VR/MR Viewer</title>
+<style>
+  html,body{margin:0;padding:0;overflow:hidden;background:#000;}
+  #container{position:relative;width:100vw;height:100vh;display:flex;justify-content:center;align-items:center;}
+  canvas.eye{border-radius:12px;margin:0 10px;background:#000;}
+  #menu{position:absolute;padding:15px;background:rgba(0,0,0,0.7);border-radius:12px;color:white;font-family:sans-serif;display:none;}
+  #fovSlider,#fullscreenBtn{position:absolute;z-index:10;}
+  #fovSlider{top:10px;left:10px;width:120px;}
+  #fullscreenBtn{top:10px;right:10px;font-size:16px;padding:6px 12px;}
+</style>
 </head>
 <body>
-  <canvas id="leftCanvas"></canvas>
-  <canvas id="rightCanvas"></canvas>
+<div id="container">
+  <canvas id="leftEye" class="eye"></canvas>
+  <canvas id="rightEye" class="eye"></canvas>
+  <div id="menu">VR Menu</div>
+</div>
+<input type="range" id="fovSlider" min="30" max="120" value="70">
+<button id="fullscreenBtn">Fullscreen</button>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-  <script>
-    let xrSession = null;
-    let renderer, scene, cameraLeft, cameraRight, controller;
-    let leftCanvas = document.getElementById('leftCanvas');
-    let rightCanvas = document.getElementById('rightCanvas');
+<script src="https://cdn.jsdelivr.net/npm/three@0.153.0/build/three.min.js"></script>
+<script>
+(async ()=>{
+  const leftCanvas=document.getElementById('leftEye');
+  const rightCanvas=document.getElementById('rightEye');
+  const leftCtx=leftCanvas.getContext('2d');
+  const rightCtx=rightCanvas.getContext('2d');
+  const menu=document.getElementById('menu');
+  const fovSlider=document.getElementById('fovSlider');
+  const fullscreenBtn=document.getElementById('fullscreenBtn');
 
-    async function initAR() {
-      if (!navigator.xr) {
-        alert("WebXR not supported on this device.");
-        return;
-      }
+  let fovScale=0.7, menuVisible=false, menuWorldYaw=0, eyeGap=20;
 
-      xrSession = await navigator.xr.requestSession('immersive-ar', {
-        requiredFeatures: ['hit-test'],
-        optionalFeatures: ['local', 'dom-overlay']
-      });
+  function resizeCanvases(){
+    const width=window.innerWidth*fovScale*0.5-eyeGap;
+    const height=width/1.5;
+    leftCanvas.width=rightCanvas.width=width;
+    leftCanvas.height=rightCanvas.height=height;
+  }
 
-      xrSession.addEventListener('end', onSessionEnded);
+  fovSlider.addEventListener('input',()=>{ fovScale=fovSlider.value/100; resizeCanvases(); });
+  fullscreenBtn.addEventListener('click',()=>{ if(!document.fullscreenElement) document.documentElement.requestFullscreen(); else document.exitFullscreen(); });
 
-      renderer = new THREE.WebGLRenderer({ canvas: leftCanvas });
-      renderer.autoClear = false;
-      scene = new THREE.Scene();
+  resizeCanvases();
 
-      cameraLeft = new THREE.PerspectiveCamera(90, window.innerWidth / window.innerHeight, 0.1, 1000);
-      cameraRight = new THREE.PerspectiveCamera(90, window.innerWidth / window.innerHeight, 0.1, 1000);
+  // camera feed
+  const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment', width:{ideal:9999}, height:{ideal:9999}}, audio:false});
+  const video=document.createElement('video'); video.srcObject=stream; await video.play();
 
-      controller = renderer.xr.getController(0);
-      xrSession.addEventListener('selectstart', onSelectStart);
+  function drawLoop(){
+    leftCtx.drawImage(video,0,0,leftCanvas.width,leftCanvas.height);
+    rightCtx.drawImage(video,0,0,rightCanvas.width,rightCanvas.height);
+    requestAnimationFrame(drawLoop);
+  }
+  drawLoop();
 
-      animate();
+  // world-anchored menu
+  window.addEventListener('deviceorientation',e=>{
+    if(!menuVisible) return;
+    const gamma=e.gamma||0; // yaw
+    const centerX=window.innerWidth/2-menu.offsetWidth/2;
+    menu.style.left=`${centerX + (menuWorldYaw - gamma)*2}px`;
+    menu.style.top=`${window.innerHeight/2 - menu.offsetHeight/2}px`; // fixed vertical
+  });
+
+  let lastTap=0;
+  window.addEventListener('touchend',e=>{
+    const now=Date.now();
+    if(now-lastTap<300){
+      menuVisible=!menuVisible;
+      menu.style.display=menuVisible?'block':'none';
+      if(menuVisible) menuWorldYaw=(e.gamma||0)||0;
     }
+    lastTap=now;
+  });
 
-    function animate() {
-      if (xrSession) {
-        xrSession.requestAnimationFrame(animate);
-      }
+  window.addEventListener('resize',resizeCanvases);
 
-      renderer.render(scene, cameraLeft);
-      renderer.render(scene, cameraRight);
-    }
-
-    function onSelectStart(event) {
-      // Handle model placement
-    }
-
-    function onSessionEnded() {
-      xrSession = null;
-      renderer.dispose();
-    }
-
-    window.addEventListener('resize', () => {
-      leftCanvas.width = rightCanvas.width = window.innerWidth;
-      leftCanvas.height = rightCanvas.height = window.innerHeight;
-      cameraLeft.aspect = cameraRight.aspect = window.innerWidth / window.innerHeight;
-      cameraLeft.updateProjectionMatrix();
-      cameraRight.updateProjectionMatrix();
-    });
-
-    initAR();
-  </script>
+})();
+</script>
 </body>
 </html>
