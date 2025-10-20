@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Basic VR Viewer</title>
+<title>World-Locked VR Menu</title>
 <style>
   html, body {
     margin: 0;
@@ -19,19 +19,34 @@
 
   #vr-container {
     display: flex;
-    flex-direction: row;
     justify-content: space-between;
-    width: 80%; /* Smaller than full screen */
-    max-width: 800px;
-    height: 50%; /* Smaller than full screen */
+    width: 80%;
+    max-width: 1000px;
+    height: 50%;
   }
 
   video {
-    width: 48%; /* leave space between windows */
+    width: 48%;
     height: 100%;
-    background: #111;
     border: 2px solid #444;
     object-fit: cover;
+    background: #111;
+  }
+
+  #menu {
+    position: absolute;
+    width: 220px;
+    height: 120px;
+    background: rgba(255,255,255,0.85);
+    border-radius: 10px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 20px;
+    color: #000;
+    pointer-events: none;
+    visibility: hidden;
+    transition: opacity 0.3s;
   }
 
   /* Force landscape */
@@ -58,23 +73,101 @@
   <video id="right-eye" autoplay muted playsinline></video>
 </div>
 
+<div id="menu">VR Menu</div>
+
 <script>
+let lastTap = 0;
+let menuSpawned = false;
+let menuYaw = 0;
+let menuPitch = 0;
+const menu = document.getElementById('menu');
+
+// Start camera with high resolution
 async function startCamera() {
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        width: { ideal: 3840 }, // request 4K if possible
+        height: { ideal: 2160 },
+        facingMode: 'environment'
+      },
+      audio: false
+    });
+
     const leftEye = document.getElementById('left-eye');
     const rightEye = document.getElementById('right-eye');
 
-    // Both eyes show the same video
     leftEye.srcObject = stream;
     rightEye.srcObject = stream;
+
+    leftEye.addEventListener('loadedmetadata', () => {
+      console.log("Camera resolution:", leftEye.videoWidth, "x", leftEye.videoHeight);
+    });
+
   } catch (err) {
-    console.error("Error accessing camera: ", err);
-    alert("Could not access camera. Please allow camera permissions.");
+    console.error("Camera error:", err);
+    alert("Could not access camera. Please allow permissions.");
   }
 }
 
 startCamera();
+
+// Double-tap to spawn world-locked menu
+window.addEventListener('touchend', (e) => {
+  const currentTime = new Date().getTime();
+  const tapLength = currentTime - lastTap;
+
+  if (tapLength < 300 && tapLength > 0) {
+    spawnMenu();
+    e.preventDefault();
+    e.stopPropagation();
+  }
+  lastTap = currentTime;
+});
+
+function spawnMenu() {
+  menu.style.visibility = 'visible';
+  menu.style.opacity = 1;
+  menuSpawned = true;
+  menuYaw = currentYaw;
+  menuPitch = currentPitch;
+}
+
+// Track device orientation
+let currentYaw = 0;
+let currentPitch = 0;
+
+window.addEventListener('deviceorientation', (event) => {
+  if(event.alpha !== null && event.beta !== null){
+    // alpha = yaw, beta = pitch
+    currentYaw = event.alpha;   // 0-360
+    currentPitch = event.beta;  // -180 to 180
+
+    if(menuSpawned){
+      // Compute offsets
+      let yawOffset = menuYaw - currentYaw;
+      yawOffset = ((yawOffset + 180) % 360) - 180;
+
+      let pitchOffset = menuPitch - currentPitch;
+      pitchOffset = Math.max(Math.min(pitchOffset, 90), -90); // clamp
+
+      const fov = 90; // horizontal field of view
+      const vFov = 60; // vertical field of view
+
+      const screenWidth = window.innerWidth;
+      const screenHeight = window.innerHeight;
+
+      let x = (screenWidth / 2) + (yawOffset / (fov/2)) * (screenWidth / 2);
+      let y = (screenHeight / 2) - (pitchOffset / (vFov/2)) * (screenHeight / 2);
+
+      x = Math.min(Math.max(0, x), screenWidth - menu.offsetWidth);
+      y = Math.min(Math.max(0, y), screenHeight - menu.offsetHeight);
+
+      menu.style.left = x + 'px';
+      menu.style.top = y + 'px';
+    }
+  }
+});
 </script>
 </body>
 </html>
