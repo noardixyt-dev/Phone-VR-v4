@@ -28,7 +28,7 @@
 
   .eye-container {
     position: relative;
-    width: 35%;          /* smaller for proper FOV */
+    width: 33%;          /* slightly smaller for proper FOV */
     aspect-ratio: 1/1;   /* square */
     margin: 0 5px;       /* small gap between eyes */
     background: #000;
@@ -126,6 +126,11 @@ async function startCamera() {
     });
     leftEye.srcObject = stream;
     rightEye.srcObject = stream;
+
+    // Force video to play on mobile
+    leftEye.onloadedmetadata = () => leftEye.play();
+    rightEye.onloadedmetadata = () => rightEye.play();
+
   } catch(err) {
     console.error("Camera error:", err);
     alert("Could not access camera. Please allow permissions.");
@@ -176,11 +181,10 @@ function updateMenuPosition() {
   const fov = 100;  // horizontal FOV
   const vFov = 80;  // vertical FOV
 
-  // yaw inverted so menu stays fixed in world
-  let yawOffset = ((currentYaw - menuYaw + 540) % 360) - 180;
-  let pitchOffset = -(menuPitch - currentPitch);
+  // Correct world-locked offsets
+  let yawOffset = ((menuYaw - currentYaw + 540) % 360) - 180;  // menu stays fixed in world
+  let pitchOffset = menuPitch - currentPitch;                   // looking up moves menu down, etc.
 
-  // visibility check
   const visible = Math.abs(yawOffset) <= fov/2 && Math.abs(pitchOffset) <= vFov/2;
 
   if(visible){
