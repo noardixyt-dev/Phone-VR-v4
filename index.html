@@ -24,7 +24,6 @@ html, body {
   align-items: center;
   width: 100%;
   height: 100%;
-  transition: transform 0.05s linear;
 }
 
 .eye-container {
@@ -119,13 +118,10 @@ const fovSlider = document.getElementById('fov-slider');
 const xaxisSlider = document.getElementById('xaxis-slider');
 
 let currentYaw = 0, currentPitch = 0;
-let menuYaw = 0, menuPitch = 0;
 let menuSpawned = false;
+let menuWorldYaw = 0, menuWorldPitch = 0;
 let menuPos = {xL:0, yL:0, xR:0, yR:0};
-
-const yawMultiplier = 1.0;
-const pitchMultiplier = 1.5;
-const smoothing = 0.25;
+const smoothing = 0.22;
 const baseGap = 20;
 const defaultWidth = 45;
 let xOffset = 0;
@@ -185,34 +181,42 @@ window.addEventListener('touchend', e=>{
 
 function spawnMenu(){
   menuSpawned = true;
-  menuYaw = currentYaw;
-  menuPitch = currentPitch;
+  menuWorldYaw = currentYaw;
+  menuWorldPitch = currentPitch;
 }
 
 // Lerp helper
 function lerp(a,b,t){ return a+(b-a)*t; }
 
-// Menu position projection
+// Convert world yaw/pitch to screen coordinates
+function worldToScreen(menuYaw, menuPitch, rect) {
+  const fovH = 100; // horizontal FOV
+  const fovV = 80;  // vertical FOV (for completeness)
+  // horizontal delta
+  let deltaYaw = menuYaw - currentYaw;
+  deltaYaw = ((deltaYaw + 540) % 360) - 180; // normalize
+  // vertical delta (optional, not used for up/down in this version)
+  // project only horizontal
+  const x = rect.width/2 - (deltaYaw / (fovH/2)) * (rect.width/2) * 1.0 - 90; // 90 = half menu width
+  const y = rect.height/2 - 50; // vertical center
+  return {x,y};
+}
+
+// Update menu position (world-locked, yaw-only)
 function updateMenuPosition(){
-  const fov = 100;
-  const vFov = 80;
-
-  const deltaYaw = menuYaw - currentYaw;   // horizontal
-  const deltaPitch = menuPitch - currentPitch; // vertical
-
   const lRect = leftContainer.getBoundingClientRect();
   const rRect = rightContainer.getBoundingClientRect();
 
-  const targetXL = (lRect.width/2) - (deltaYaw/(fov/2))* (lRect.width/2) * yawMultiplier - menuLeft.offsetWidth/2;
-  const targetYL = (lRect.height/2) - (deltaPitch/(vFov/2)) * (lRect.height/2) * pitchMultiplier - menuLeft.offsetHeight/2;
-  const targetXR = (rRect.width/2) - (deltaYaw/(fov/2))* (rRect.width/2) * yawMultiplier - menuRight.offsetWidth/2;
-  const targetYR = (rRect.height/2) - (deltaPitch/(vFov/2)) * (rRect.height/2) * pitchMultiplier - menuRight.offsetHeight/2;
+  const targetL = worldToScreen(menuWorldYaw, menuWorldPitch, lRect);
+  const targetR = worldToScreen(menuWorldYaw, menuWorldPitch, rRect);
 
-  menuPos.xL = lerp(menuPos.xL, targetXL, smoothing);
-  menuPos.yL = lerp(menuPos.yL, targetYL, smoothing);
-  menuPos.xR = lerp(menuPos.xR, targetXR, smoothing);
-  menuPos.yR = lerp(menuPos.yR, targetYR, smoothing);
+  // smooth
+  menuPos.xL = lerp(menuPos.xL, targetL.x, smoothing);
+  menuPos.yL = lerp(menuPos.yL, targetL.y, smoothing);
+  menuPos.xR = lerp(menuPos.xR, targetR.x, smoothing);
+  menuPos.yR = lerp(menuPos.yR, targetR.y, smoothing);
 
+  // apply
   menuLeft.style.left = menuPos.xL + "px";
   menuLeft.style.top = menuPos.yL + "px";
   menuRight.style.left = menuPos.xR + "px";
