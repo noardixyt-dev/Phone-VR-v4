@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>VR Camera Test</title>
+<title>VR Camera Viewer</title>
 <style>
 html, body {margin:0; height:100%; background:black; overflow:hidden; font-family:sans-serif;}
 #container {display:flex; justify-content:center; align-items:center; height:100%; width:100%; position:relative;}
 canvas {background:#000; border-radius:12px;}
-#canvasLeft {margin-right:4vw;}
-#canvasRight {margin-left:4vw;}
-canvas.small {width:40vw; height:40vw;} /* smaller than screen */
+#canvasLeft {margin-right:5vw;}
+#canvasRight {margin-left:5vw;}
+canvas.small {width:35vw; height:35vw;} /* smaller than before for more FOV */
 .menu {
   position:absolute;
   background:rgba(0,0,0,0.6);
@@ -53,13 +53,18 @@ const canvasLeft = document.getElementById('canvasLeft');
 const canvasRight = document.getElementById('canvasRight');
 const ctxLeft = canvasLeft.getContext('2d');
 const ctxRight = canvasRight.getContext('2d');
+
 const menuLeft = document.getElementById('menuLeft');
 const menuRight = document.getElementById('menuRight');
+
 const startBtn = document.getElementById('startBtn');
 const fullscreenBtn = document.getElementById('fullscreenBtn');
 
 let videoStream;
 let menuVisible = false;
+let uiVisible = true;
+let lastTap = 0;
+let tapCount = 0;
 
 // Start camera and draw to canvas
 async function startCamera(){
@@ -78,7 +83,7 @@ async function startCamera(){
   }catch(e){alert("Camera access failed: "+e.message);}
 }
 
-// Draw the video feed to both eye canvases
+// Draw video to both canvases
 function drawLoop(video){
   const draw = ()=>{
     ctxLeft.drawImage(video, 0, 0, canvasLeft.width, canvasLeft.height);
@@ -88,35 +93,52 @@ function drawLoop(video){
   draw();
 }
 
-// Fullscreen
+// Fullscreen toggle
 fullscreenBtn.onclick = ()=>{
   if(!document.fullscreenElement){
     document.documentElement.requestFullscreen().catch(()=>{});
+    hideUI();
   } else {
     document.exitFullscreen();
+    showUI();
   }
 };
 
-// Double-tap to toggle menu
-let lastTap = 0;
+// Show/hide UI
+function hideUI(){document.getElementById('controls').style.display='none'; uiVisible=false;}
+function showUI(){document.getElementById('controls').style.display='flex'; uiVisible=true;}
+
+// Double-tap menu / Triple-tap UI
 document.body.addEventListener('touchend', ()=>{
   const now = Date.now();
   if(now - lastTap < 300){
-    menuVisible = !menuVisible;
-    menuLeft.style.display = menuVisible?'block':'none';
-    menuRight.style.display = menuVisible?'block':'none';
-    // center menu over each canvas
-    const rectL = canvasLeft.getBoundingClientRect();
-    const rectR = canvasRight.getBoundingClientRect();
-    menuLeft.style.left = rectL.left + rectL.width/2 + 'px';
-    menuLeft.style.top  = rectL.top  + rectL.height/2 + 'px';
-    menuRight.style.left = rectR.left + rectR.width/2 + 'px';
-    menuRight.style.top  = rectR.top  + rectR.height/2 + 'px';
+    tapCount++;
+    if(tapCount === 2){
+      // Double-tap detected -> toggle menu
+      menuVisible = !menuVisible;
+      menuLeft.style.display = menuVisible?'block':'none';
+      menuRight.style.display = menuVisible?'block':'none';
+      // center menu over each canvas
+      const rectL = canvasLeft.getBoundingClientRect();
+      const rectR = canvasRight.getBoundingClientRect();
+      menuLeft.style.left = rectL.left + rectL.width/2 + 'px';
+      menuLeft.style.top  = rectL.top  + rectL.height/2 + 'px';
+      menuRight.style.left = rectR.left + rectR.width/2 + 'px';
+      menuRight.style.top  = rectR.top  + rectR.height/2 + 'px';
+    } else if(tapCount === 3){
+      // Triple-tap -> toggle UI in fullscreen
+      if(document.fullscreenElement){
+        if(uiVisible) hideUI(); else showUI();
+      }
+      tapCount = 0;
+    }
+  } else {
+    tapCount = 1;
   }
   lastTap = now;
 });
 
-// Resize canvas to match visual size without downscaling video
+// Resize canvases to match display size
 function resizeCanvas(){
   canvasLeft.width = canvasLeft.clientWidth;
   canvasLeft.height = canvasLeft.clientHeight;
