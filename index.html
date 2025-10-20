@@ -1,167 +1,80 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>VR Camera Viewer Fixed</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Basic VR Viewer</title>
 <style>
-html, body {margin:0; height:100%; background:black; overflow:hidden; font-family:sans-serif;}
-#container {position:relative; width:100%; height:100%; display:flex; justify-content:center; align-items:center;}
-canvas {background:#000; border-radius:12px;}
-canvas.eye {width:40vw; height:auto;} /* width constrained, height scales to aspect ratio */
-canvas#canvasLeft {margin-right:5vw;}
-canvas#canvasRight {margin-left:5vw;}
-.menu {
-  position:absolute;
-  background:rgba(0,0,0,0.6);
-  color:white;
-  padding:10px 20px;
-  border-radius:12px;
-  font-size:16px;
-  backdrop-filter:blur(6px);
-  pointer-events:none;
-  display:none;
-}
-#controls {
-  position:fixed; bottom:12px; left:50%;
-  transform:translateX(-50%);
-  z-index:10; display:flex; gap:12px;
-}
-button {
-  background: rgba(255,255,255,0.15);
-  color:white; border:none;
-  padding:10px 14px; border-radius:10px;
-  font-size:15px; backdrop-filter:blur(4px);
-}
-button:hover {background: rgba(255,255,255,0.25);}
+  html, body {
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    height: 100%;
+    width: 100%;
+    background: #000;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+
+  #vr-container {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    width: 80%; /* Smaller than full screen */
+    max-width: 800px;
+    height: 50%; /* Smaller than full screen */
+  }
+
+  video {
+    width: 48%; /* leave space between windows */
+    height: 100%;
+    background: #111;
+    border: 2px solid #444;
+    object-fit: cover;
+  }
+
+  /* Force landscape */
+  @media screen and (orientation: portrait) {
+    body::before {
+      content: "Please rotate your device to landscape";
+      color: white;
+      font-size: 2em;
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+    }
+    #vr-container {
+      display: none;
+    }
+  }
 </style>
 </head>
 <body>
-<div id="container">
-  <canvas id="canvasLeft" class="eye"></canvas>
-  <canvas id="canvasRight" class="eye"></canvas>
-  <div class="menu" id="menuLeft">TEST</div>
-  <div class="menu" id="menuRight">TEST</div>
-</div>
-
-<div id="controls">
-  <button id="startBtn">Start Camera</button>
-  <button id="fullscreenBtn">Fullscreen</button>
+<div id="vr-container">
+  <video id="left-eye" autoplay muted playsinline></video>
+  <video id="right-eye" autoplay muted playsinline></video>
 </div>
 
 <script>
-const canvasLeft = document.getElementById('canvasLeft');
-const canvasRight = document.getElementById('canvasRight');
-const ctxLeft = canvasLeft.getContext('2d');
-const ctxRight = canvasRight.getContext('2d');
-const menuLeft = document.getElementById('menuLeft');
-const menuRight = document.getElementById('menuRight');
-const startBtn = document.getElementById('startBtn');
-const fullscreenBtn = document.getElementById('fullscreenBtn');
-const controls = document.getElementById('controls');
+async function startCamera() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    const leftEye = document.getElementById('left-eye');
+    const rightEye = document.getElementById('right-eye');
 
-let video;
-let videoStream;
-let menuVisible = false;
-let uiVisible = true;
-let lastTap = 0;
-let tapCount = 0;
-let menuRefOrientation = null;
-
-// Resize canvas to match video natural size
-function resizeCanvas(){
-  if(!video) return;
-  canvasLeft.width = video.videoWidth;
-  canvasLeft.height = video.videoHeight;
-  canvasRight.width = video.videoWidth;
-  canvasRight.height = video.videoHeight;
-}
-window.addEventListener('resize', resizeCanvas);
-
-// Start camera
-async function startCamera(){
-  try{
-    videoStream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}, audio:false});
-    video = document.createElement('video');
-    video.srcObject = videoStream;
-    video.autoplay = true;
-    video.playsInline = true;
-    video.muted = true;
-    video.onloadedmetadata = ()=>{
-      video.play();
-      resizeCanvas();
-      drawLoop();
-    };
-  }catch(e){alert("Camera access failed: "+e.message);}
-}
-
-// Draw video feed to both canvases
-function drawLoop(){
-  ctxLeft.drawImage(video,0,0,canvasLeft.width,canvasLeft.height);
-  ctxRight.drawImage(video,0,0,canvasRight.width,canvasRight.height);
-  requestAnimationFrame(drawLoop);
-}
-
-// Fullscreen toggle
-fullscreenBtn.onclick = ()=>{
-  if(!document.fullscreenElement){
-    document.documentElement.requestFullscreen().catch(()=>{});
-    hideUI();
-  } else {
-    document.exitFullscreen();
-    showUI();
+    // Both eyes show the same video
+    leftEye.srcObject = stream;
+    rightEye.srcObject = stream;
+  } catch (err) {
+    console.error("Error accessing camera: ", err);
+    alert("Could not access camera. Please allow camera permissions.");
   }
-};
-function hideUI(){controls.style.display='none'; uiVisible=false;}
-function showUI(){controls.style.display='flex'; uiVisible=true;}
+}
 
-// DeviceOrientation for world-locked menu
-let currentOrientation = {alpha:0,beta:0,gamma:0};
-window.addEventListener('deviceorientation', (e)=>{
-  currentOrientation = {alpha:e.alpha||0, beta:e.beta||0, gamma:e.gamma||0};
-  if(menuVisible && menuRefOrientation){
-    const deltaAlpha = currentOrientation.alpha - menuRefOrientation.alpha;
-    const deltaBeta  = currentOrientation.beta  - menuRefOrientation.beta;
-    const deltaGamma = currentOrientation.gamma - menuRefOrientation.gamma;
-
-    // simple projection to 2D screen
-    const maxShift = 100;
-    const xShift = Math.max(-maxShift, Math.min(maxShift, deltaGamma*1.5));
-    const yShift = Math.max(-maxShift, Math.min(maxShift, deltaBeta*1.2));
-
-    // position menus over each eye canvas
-    const rectL = canvasLeft.getBoundingClientRect();
-    const rectR = canvasRight.getBoundingClientRect();
-    menuLeft.style.left = rectL.left + rectL.width/2 + xShift + 'px';
-    menuLeft.style.top  = rectL.top  + rectL.height/2 + yShift + 'px';
-    menuRight.style.left = rectR.left + rectR.width/2 + xShift + 'px';
-    menuRight.style.top  = rectR.top  + rectR.height/2 + yShift + 'px';
-  }
-});
-
-// Tap detection: double-tap for menu, triple-tap for UI
-document.body.addEventListener('touchend', ()=>{
-  const now = Date.now();
-  if(now - lastTap < 300){
-    tapCount++;
-    if(tapCount === 2){
-      // double-tap -> toggle menu
-      menuVisible = !menuVisible;
-      menuLeft.style.display = menuVisible?'block':'none';
-      menuRight.style.display = menuVisible?'block':'none';
-      if(menuVisible) menuRefOrientation = {...currentOrientation};
-    } else if(tapCount === 3){
-      // triple-tap -> toggle UI buttons in fullscreen
-      if(document.fullscreenElement){
-        if(uiVisible) hideUI(); else showUI();
-      }
-      tapCount = 0;
-    }
-  } else tapCount = 1;
-  lastTap = now;
-});
-
-startBtn.onclick = startCamera;
+startCamera();
 </script>
 </body>
 </html>
