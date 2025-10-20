@@ -28,9 +28,9 @@
 
   .eye-container {
     position: relative;
-    width: 40%;         /* smaller than full screen for proper FOV */
-    aspect-ratio: 1/1;  /* square */
-    margin: 0 5px;      /* small gap between eyes */
+    width: 35%;          /* smaller for proper FOV */
+    aspect-ratio: 1/1;   /* square */
+    margin: 0 5px;       /* small gap between eyes */
     background: #000;
     overflow: hidden;
     border: 1px solid #222;
@@ -39,7 +39,7 @@
   .eye-container video {
     width: 100%;
     height: 100%;
-    object-fit: contain; /* show full camera feed */
+    object-fit: contain;  /* show full camera feed */
   }
 
   .menu {
@@ -113,22 +113,19 @@ let menuYaw = 0;
 let menuPitch = 0;
 let menuSpawned = false;
 
-// Start camera automatically at highest resolution
+// Start camera automatically at high resolution
 async function startCamera() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
       video: {
         width: { ideal: 3840 },
-        height: { ideal: 3840 }, // square
+        height: { ideal: 3840 },
         facingMode: 'environment'
       },
       audio: false
     });
     leftEye.srcObject = stream;
     rightEye.srcObject = stream;
-    leftEye.addEventListener('loadedmetadata', () => {
-      console.log("Camera resolution:", leftEye.videoWidth, "x", leftEye.videoHeight);
-    });
   } catch(err) {
     console.error("Camera error:", err);
     alert("Could not access camera. Please allow permissions.");
@@ -176,29 +173,28 @@ function spawnMenu(){
 }
 
 function updateMenuPosition() {
-  const fov = 90;  // horizontal
-  const vFov = 60; // vertical
+  const fov = 100;  // horizontal FOV
+  const vFov = 80;  // vertical FOV
 
-  let yawOffset = ((menuYaw - currentYaw + 540) % 360) - 180;
-  let pitchOffset = menuPitch - currentPitch;
-  pitchOffset = Math.max(Math.min(pitchOffset, 90), -90);
+  // yaw inverted so menu stays fixed in world
+  let yawOffset = ((currentYaw - menuYaw + 540) % 360) - 180;
+  let pitchOffset = -(menuPitch - currentPitch);
 
-  const yawVisible = Math.abs(yawOffset) <= fov/2;
-  const pitchVisible = Math.abs(pitchOffset) <= vFov/2;
-  const visible = yawVisible && pitchVisible;
+  // visibility check
+  const visible = Math.abs(yawOffset) <= fov/2 && Math.abs(pitchOffset) <= vFov/2;
 
   if(visible){
     // Left eye
     const lRect = leftContainer.getBoundingClientRect();
     let xL = (lRect.width/2) + (yawOffset/(fov/2))*(lRect.width/2) - menuLeft.offsetWidth/2;
-    let yL = (lRect.height/2) - (pitchOffset/(vFov/2))*(lRect.height/2) - menuLeft.offsetHeight/2;
+    let yL = (lRect.height/2) + (pitchOffset/(vFov/2))*(lRect.height/2) - menuLeft.offsetHeight/2;
     menuLeft.style.left = xL + "px";
     menuLeft.style.top = yL + "px";
 
     // Right eye
     const rRect = rightContainer.getBoundingClientRect();
     let xR = (rRect.width/2) + (yawOffset/(fov/2))*(rRect.width/2) - menuRight.offsetWidth/2;
-    let yR = (rRect.height/2) - (pitchOffset/(vFov/2))*(rRect.height/2) - menuRight.offsetHeight/2;
+    let yR = (rRect.height/2) + (pitchOffset/(vFov/2))*(rRect.height/2) - menuRight.offsetHeight/2;
     menuRight.style.left = xR + "px";
     menuRight.style.top = yR + "px";
 
