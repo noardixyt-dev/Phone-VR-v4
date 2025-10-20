@@ -20,17 +20,19 @@
 
   #vr-container {
     display: flex;
-    justify-content: space-between;
+    justify-content: center;
+    align-items: center;
     width: 100%;
     height: 100%;
   }
 
   video {
-    width: 49%; /* two eyes side by side */
+    width: 45%;           /* zoomed-out so full camera feed fits */
     height: 100%;
-    object-fit: cover;
+    object-fit: contain;   /* show entire feed */
     background: #111;
     border: 1px solid #222;
+    margin: 0 2.5%;       /* gap between eyes */
   }
 
   .menu {
@@ -59,7 +61,6 @@
     z-index: 1000;
   }
 
-  /* Landscape enforcement */
   @media screen and (orientation: portrait) {
     body::before {
       content: "Please rotate your device to landscape";
@@ -71,9 +72,7 @@
       transform: translate(-50%, -50%);
       text-align: center;
     }
-    #vr-container {
-      display: none;
-    }
+    #vr-container { display: none; }
   }
 </style>
 </head>
@@ -101,7 +100,7 @@ let menuYaw = 0;
 let menuPitch = 0;
 let menuSpawned = false;
 
-// Request camera automatically
+// Start camera automatically at highest available resolution
 async function startCamera() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -112,9 +111,9 @@ async function startCamera() {
       },
       audio: false
     });
-
     leftEye.srcObject = stream;
     rightEye.srcObject = stream;
+
     leftEye.addEventListener('loadedmetadata', () => {
       console.log("Camera resolution:", leftEye.videoWidth, "x", leftEye.videoHeight);
     });
@@ -159,6 +158,7 @@ window.addEventListener('touchend', (e) => {
   lastTap = now;
 });
 
+// Spawn world-locked menu
 function spawnMenu(){
   menuSpawned = true;
   menuYaw = currentYaw;
@@ -167,32 +167,37 @@ function spawnMenu(){
   menuRight.style.visibility = "visible";
 }
 
+// Update menu position for both eyes
 function updateMenuPosition() {
-  const fov = 90; // horizontal field of view
-  const vFov = 60; // vertical field of view
-  const screenWidth = window.innerWidth;
-  const screenHeight = window.innerHeight;
+  const fov = 90;  // horizontal FOV
+  const vFov = 60; // vertical FOV
 
-  // compute yaw/pitch offsets
-  let yawOffset = menuYaw - currentYaw;
-  yawOffset = ((yawOffset + 180) % 360) - 180; // -180..180
+  const leftRect = leftEye.getBoundingClientRect();
+  const rightRect = rightEye.getBoundingClientRect();
 
+  let yawOffset = ((menuYaw - currentYaw + 540) % 360) - 180;
   let pitchOffset = menuPitch - currentPitch;
-  pitchOffset = Math.max(Math.min(pitchOffset, 90), -90); // clamp
+  pitchOffset = Math.max(Math.min(pitchOffset, 90), -90);
 
-  // Only show menu if inside field of view
   const yawVisible = Math.abs(yawOffset) <= fov/2;
   const pitchVisible = Math.abs(pitchOffset) <= vFov/2;
   const visible = yawVisible && pitchVisible;
 
-  const x = (screenWidth/4) + (yawOffset / (fov/2)) * (screenWidth/4) - menuLeft.offsetWidth/2;
-  const y = (screenHeight/2) - (pitchOffset / (vFov/2)) * (screenHeight/2) - menuLeft.offsetHeight/2;
-
   if(visible){
-    menuLeft.style.left = x + "px";
-    menuLeft.style.top = y + "px";
-    menuRight.style.left = x + "px";
-    menuRight.style.top = y + "px";
+    // Left eye menu
+    let xLeft = leftRect.left + (leftRect.width/2) + (yawOffset/(fov/2))*(leftRect.width/2) - menuLeft.offsetWidth/2;
+    let yLeft = leftRect.top + (leftRect.height/2) - (pitchOffset/(vFov/2))*(leftRect.height/2) - menuLeft.offsetHeight/2;
+    menuLeft.style.left = xLeft + "px";
+    menuLeft.style.top = yLeft + "px";
+
+    // Right eye menu
+    let xRight = rightRect.left + (rightRect.width/2) + (yawOffset/(fov/2))*(rightRect.width/2) - menuRight.offsetWidth/2;
+    let yRight = rightRect.top + (rightRect.height/2) - (pitchOffset/(vFov/2))*(rightRect.height/2) - menuRight.offsetHeight/2;
+    menuRight.style.left = xRight + "px";
+    menuRight.style.top = yRight + "px";
+
+    menuLeft.style.visibility = "visible";
+    menuRight.style.visibility = "visible";
   } else {
     menuLeft.style.visibility = "hidden";
     menuRight.style.visibility = "hidden";
