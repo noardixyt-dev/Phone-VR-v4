@@ -1,446 +1,138 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-<title>VR Passthrough — Stereo HUD</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>VR Camera Test</title>
 <style>
-  html,body{height:100%;margin:0;background:#000;color:#fff;font-family:system-ui, -apple-system, Roboto, Arial;}
-  #root{width:100%;height:100%;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;}
-  .eyes{display:flex;gap:4vw;width:100%;height:100%;align-items:center;justify-content:center;padding:4vh 3vw;box-sizing:border-box;pointer-events:none;}
-  .eye{position:relative;width:45vw;max-width:46vw;aspect-ratio:1/1;background:#000;border-radius:10px;overflow:hidden;pointer-events:auto;}
-  canvas{width:100%;height:100%;display:block;}
-  #touchLayer{position:absolute;inset:0;z-index:50;touch-action:none;}
-  .status{position:absolute;left:10px;top:10px;background:rgba(0,0,0,0.45);padding:8px 10px;border-radius:8px;font-size:13px;z-index:60;}
-  .perm{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:80;background:linear-gradient(0deg, rgba(0,0,0,0.6), rgba(0,0,0,0.3));}
-  .perm .card{background:rgba(0,0,0,0.85);padding:18px;border-radius:12px;text-align:center;max-width:360px;}
-  .btn{display:inline-block;padding:8px 10px;border-radius:8px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.06);font-size:14px;margin-left:6px;}
-  /* accessibility: show debug box when needed */
-  .debugBox{position:absolute;right:10px;top:10px;background:rgba(255,255,255,0.06);padding:6px 8px;border-radius:8px;font-size:12px;z-index:60;}
+  html,body {margin:0; height:100%; background:black; overflow:hidden; font-family:sans-serif;}
+  #container {display:flex; justify-content:center; align-items:center; height:100%; width:100%; position:relative;}
+  video {object-fit:cover; width:45vw; height:45vw; border-radius:12px; background:#000;}
+  #videoLeft {margin-right:2vw;}
+  #videoRight {margin-left:2vw;}
+  .menu {
+    position:absolute;
+    background:rgba(0,0,0,0.6);
+    color:white;
+    padding:10px 20px;
+    border-radius:12px;
+    font-size:16px;
+    backdrop-filter:blur(6px);
+    pointer-events:none;
+  }
+  #controls {
+    position:fixed; bottom:12px; left:50%;
+    transform:translateX(-50%);
+    z-index:10; display:flex; gap:12px;
+  }
+  button {
+    background: rgba(255,255,255,0.15);
+    color:white; border:none;
+    padding:10px 14px; border-radius:10px;
+    font-size:15px; backdrop-filter:blur(4px);
+  }
+  button:hover {background: rgba(255,255,255,0.25);}
 </style>
 </head>
 <body>
-<div id="root">
-  <div class="eyes">
-    <div class="eye"><canvas id="leftCanvas"></canvas></div>
-    <div class="eye"><canvas id="rightCanvas"></canvas></div>
-  </div>
+<div id="container">
+  <video id="videoLeft" autoplay playsinline muted></video>
+  <video id="videoRight" autoplay playsinline muted></video>
+</div>
+<div class="menu" id="menuLeft" style="display:none;">TEST</div>
+<div class="menu" id="menuRight" style="display:none;">TEST</div>
 
-  <div id="touchLayer" aria-hidden="false"></div>
-  <div class="status" id="status">Double-tap to toggle HUD</div>
-  <div class="debugBox" id="debugBox" style="display:none;">debug</div>
-
-  <div class="perm" id="permOverlay" style="display:none;">
-    <div class="card">
-      <div style="font-weight:700;margin-bottom:8px;">Motion permission required</div>
-      <div style="margin-bottom:12px;">This page needs motion/orientation access so the HUD stays anchored. Please allow when prompted.</div>
-      <button id="reqMotion" class="btn">Request Motion Permission</button>
-    </div>
-  </div>
+<div id="controls">
+  <button id="startBtn">Start Camera</button>
+  <button id="fullscreenBtn">Fullscreen</button>
 </div>
 
 <script>
-/*
-VR Passthrough — Stereo HUD (single-file)
-Features:
-- dual square camera canvases (no stretching)
-- per-eye HUD drawn in canvases with stereoscopic parallax
-- HUD anchored in world space using device orientation (yaw/pitch/roll handling)
-- HUD disappears when out of view
-- crosshair grows when hovering; click/drag interactions via center-point
-*/
+const videoLeft = document.getElementById('videoLeft');
+const videoRight = document.getElementById('videoRight');
+const startBtn = document.getElementById('startBtn');
+const fullscreenBtn = document.getElementById('fullscreenBtn');
+const menuLeft = document.getElementById('menuLeft');
+const menuRight = document.getElementById('menuRight');
 
-(async function(){
-  // ---------- Config ----------
-  const DESIRED_CAMERA_RES = 1920;   // request big square-ish resolution
-  const HUD_DEPTH_METERS = 2.0;      // ~YouTube VR feel (2m)
-  const IPD_METERS = 0.064;          // interpupillary distance for parallax (~64mm)
-  const HUD_WIDTH_METERS = 0.9;      // physical width of HUD plane in meters
-  const HUD_HEIGHT_METERS = 0.18;    // physical height of HUD plane in meters
-  const HUD_FOV_HORIZONTAL_DEG = 80; // approximate horizontal FOV of "viewer"
-  const HUD_VISIBLE_ANGLE_DEG = 55;  // beyond this amount, HUD is considered out-of-view
-  const CROSSHAIR_BASE = 5;          // base radius px
-  const CROSSHAIR_GROW = 3;          // growth when hover
-  // --------------------------------
+let menuVisible = false;
+let refOrientation = null;
+let menuOffset = {x:0, y:0, z:2}; // 2 meters in front
 
-  const leftCanvas = document.getElementById('leftCanvas');
-  const rightCanvas = document.getElementById('rightCanvas');
-  const status = document.getElementById('status');
-  const permOverlay = document.getElementById('permOverlay');
-  const reqMotionBtn = document.getElementById('reqMotion');
-  const touchLayer = document.getElementById('touchLayer');
-  const debugBox = document.getElementById('debugBox');
+// Start camera
+async function startCamera(){
+  try{
+    const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}, audio:false});
+    videoLeft.srcObject = stream;
+    videoRight.srcObject = stream;
+  }catch(e){alert("Camera access failed: "+e.message);}
+}
 
-  // contexts
-  const lctx = leftCanvas.getContext('2d', { alpha:false });
-  const rctx = rightCanvas.getContext('2d', { alpha:false });
-
-  // video
-  const video = document.createElement('video');
-  video.autoplay = true; video.playsInline = true; video.muted = true;
-  let stream = null;
-
-  // States
-  let hudVisible = false;
-  let alwaysOnCrosshair = false;
-  let crosshairEnabled = false; // visible when HUD visible or alwaysOnCrosshair
-  let zoomFactor = 1.0; // video zoom applied (1.0 normal)
-  let fullscreen = false;
-
-  // Orientation state
-  let orientation = { alpha:0, beta:0, gamma:0 }; // degrees
-  let reference = null; // baseline orientation when HUD was toggled on
-  let gotOrientation = false;
-
-  // Touch / click tracking
-  let lastTap = 0;
-  let isDragging = false;
-
-  // Interaction region for HUD: we define HUD elements by normalized rects in HUD plane space.
-  // We'll draw buttons and a slider; when projected into eye canvas, we can check center overlap.
-
-  // HUD element definitions in HUD-local coordinates (meters), origin at HUD center.
-  const hudElements = [
-    { id: 'fullscreen', type:'button', label:'Fullscreen', x:-0.35, y:0, w:0.24, h:0.12 },
-    { id: 'zoomToggle', type:'button', label:'Zoom', x:-0.05, y:0, w:0.18, h:0.12 },
-    { id: 'crossToggle', type:'button', label:'Always Cross', x:0.22, y:0, w:0.28, h:0.12 },
-    { id: 'zoomSlider', type:'slider', label:'Zoom', x:0, y:0.28, w:0.62, h:0.12, min:1.0, max:2.5 }
-  ];
-
-  // some internal derived values
-  function metersToScreenX(m, proj) {
-    // proj: { focal, cx, cy } - simple perspective: screen_x = cx + focal * (m_x / z)
-    // We will compute 3D point projection directly elsewhere; this is placeholder if needed.
+// Fullscreen
+fullscreenBtn.onclick = ()=>{
+  if(!document.fullscreenElement){
+    document.documentElement.requestFullscreen().catch(()=>{});
+  } else {
+    document.exitFullscreen();
   }
+};
 
-  // ---------- Camera start ----------
-  async function startCamera(){
-    try {
-      const constraints = {
-        audio: false,
-        video: {
-          facingMode: { ideal: 'environment' },
-          width: { ideal: DESIRED_CAMERA_RES },
-          height: { ideal: DESIRED_CAMERA_RES }
-        }
-      };
-      stream = await navigator.mediaDevices.getUserMedia(constraints);
-      video.srcObject = stream;
-      await video.play();
-      status.textContent = 'Camera running — double-tap to toggle HUD';
-      resizeCanvases();
-      window.addEventListener('resize', resizeCanvases);
-      requestAnimationFrame(renderLoop);
-    } catch (err) {
-      console.error('getUserMedia error', err);
-      alert('Camera access required. Check permissions & reload.');
-      status.textContent = 'Camera error';
+// Handle device orientation
+function handleOrientation(e){
+  if(!refOrientation) return;
+  const alpha = e.alpha - refOrientation.alpha;
+  const beta  = e.beta  - refOrientation.beta;
+  const gamma = e.gamma - refOrientation.gamma;
+
+  // Compute pixel offset for menu relative to screen center
+  const maxShift = 100;
+  const xShift = Math.max(-maxShift, Math.min(maxShift, gamma*1.5));
+  const yShift = Math.max(-maxShift, Math.min(maxShift, beta*1.2));
+
+  if(menuVisible){
+    menuLeft.style.transform = `translate(calc(-50% + ${xShift}px), calc(-50% + ${yShift}px))`;
+    menuRight.style.transform = `translate(calc(-50% + ${xShift}px), calc(-50% + ${yShift}px))`;
+  }
+}
+
+// Request motion permission (iOS)
+async function initOrientation(){
+  if(typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function"){
+    const permissionState = await DeviceOrientationEvent.requestPermission();
+    if(permissionState==="granted"){
+      window.addEventListener('deviceorientation', handleOrientation);
+      refOrientation = {alpha:0,beta:0,gamma:0};
+      window.addEventListener('deviceorientation', (e)=>{if(!refOrientation) refOrientation={alpha:e.alpha,beta:e.beta,gamma:e.gamma};});
+    } else alert("Motion permission denied");
+  } else {
+    window.addEventListener('deviceorientation', handleOrientation);
+    window.addEventListener('deviceorientation', (e)=>{if(!refOrientation) refOrientation={alpha:e.alpha,beta:e.beta,gamma:e.gamma};});
+  }
+}
+
+// Double tap detection
+let lastTap = 0;
+document.body.addEventListener('touchend', (e)=>{
+  const now = Date.now();
+  if(now - lastTap < 300){
+    // double tap detected
+    menuVisible = !menuVisible;
+    menuLeft.style.display = menuVisible?'block':'none';
+    menuRight.style.display = menuVisible?'block':'none';
+    if(menuVisible && !refOrientation){
+      // capture reference orientation at spawn
+      window.addEventListener('deviceorientation', (ev)=>{
+        if(!refOrientation) refOrientation={alpha:ev.alpha,beta:ev.beta,gamma:ev.gamma};
+      }, {once:true});
     }
   }
+  lastTap = now;
+});
 
-  function resizeCanvases(){
-    const dpr = Math.max(1, window.devicePixelRatio || 1);
-    [leftCanvas, rightCanvas].forEach(c=>{
-      const rect = c.getBoundingClientRect();
-      c.width = Math.round(rect.width * dpr);
-      c.height = Math.round(rect.height * dpr);
-      const ctx = c.getContext('2d');
-      ctx.setTransform(dpr,0,0,dpr,0,0);
-    });
-  }
-
-  // ---------- Orientation handling ----------
-  function onDeviceOrientation(e){
-    // e.alpha, e.beta, e.gamma in degrees
-    gotOrientation = true;
-    orientation.alpha = (typeof e.alpha === 'number') ? e.alpha : orientation.alpha;
-    orientation.beta  = (typeof e.beta  === 'number') ? e.beta  : orientation.beta;
-    orientation.gamma = (typeof e.gamma === 'number') ? e.gamma : orientation.gamma;
-    // keep small smoothing optionally (skip to keep snappy)
-  }
-
-  async function requestMotionPermissionIfNeeded(){
-    if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
-      // iOS 13+ flow
-      permOverlay.style.display = 'flex';
-      return new Promise((resolve) => {
-        reqMotionBtn.onclick = async () => {
-          try {
-            const res = await DeviceMotionEvent.requestPermission();
-            permOverlay.style.display = 'none';
-            if (res === 'granted') {
-              window.addEventListener('deviceorientation', onDeviceOrientation);
-              resolve(true);
-            } else {
-              resolve(false);
-            }
-          } catch (err) {
-            permOverlay.style.display = 'none';
-            console.warn('motion permission request failed', err);
-            resolve(false);
-          }
-        };
-      });
-    } else {
-      // not iOS or permission not required
-      window.addEventListener('deviceorientation', onDeviceOrientation);
-      return true;
-    }
-  }
-
-  // ---------- Math helpers ----------
-  const toRad = (d)=>d*Math.PI/180;
-  const toDeg = (r)=>r*180/Math.PI;
-
-  // We'll use a small approximation: compute relative yaw/pitch/roll between current orientation and reference.
-  // Then treat the HUD plane as located at world forward vector (0,0,-depth). Project relative yaw/pitch to screen offset:
-  // screen_offset_x = focal * tan(relYaw)
-  // screen_offset_y = focal * tan(relPitch)
-  // Roll: to keep HUD horizontal to world, rotate HUD drawing by -relRoll.
-
-  function computeRelAngles(){
-    if (!reference) return { yaw:0, pitch:0, roll:0 };
-    // orientation.alpha is compass-like yaw (0-360)
-    // beta is pitch [-180,180], gamma is roll [-90,90]
-    // compute shortest delta for alpha
-    let dAlpha = orientation.alpha - reference.alpha;
-    dAlpha = ((dAlpha + 180) % 360) - 180;
-    const dBeta = orientation.beta - reference.beta;
-    const dGamma = orientation.gamma - reference.gamma;
-    // For our purposes:
-    const yaw = toRad(dAlpha);   // left-right
-    const pitch = toRad(dBeta);  // up-down
-    const roll = toRad(dGamma);  // tilt
-    return { yaw, pitch, roll };
-  }
-
-  // When projecting HUD point at depth D, the screen offset in radians approx equals angle.
-  // We'll compute projected pixel offset using focal = screenWidth/(2*tan(hfov/2))
-  function getProjectionParams(canvasWidth, canvasHeight, hfovDeg = HUD_FOV_HORIZONTAL_DEG){
-    const hfov = toRad(hfovDeg);
-    const focal = (canvasWidth/2) / Math.tan(hfov/2);
-    const cx = canvasWidth/2;
-    const cy = canvasHeight/2;
-    return { focal, cx, cy };
-  }
-
-  // Convert a HUD-plane point (x,y,z in meters, HUD center at (0,0,-depth)) into screen pixel coordinates for given eye.
-  function projectHudPoint(hudPointWorld, relAngles, projParams, eyeIPDOffsetMeters = 0){
-    // hudPointWorld: {x,y,z} in world coords relative to viewer center BEFORE stereo offset.
-    // We'll apply stereo offset by shifting HUD point sideways by eyeIPDOffsetMeters in world X.
-    const x_w = hudPointWorld.x + eyeIPDOffsetMeters;
-    const y_w = hudPointWorld.y;
-    const z_w = hudPointWorld.z; // should be negative (forward)
-
-    // Now compute coordinates in device-local view using relative rotation (inverse rotation).
-    // We have small angles relYaw (rotation around Y up), relPitch (around X), relRoll (around Z).
-    // Apply inverse rotation: rotate the world point by -yaw, -pitch, -roll.
-    const cy = Math.cos(-relAngles.yaw), sy = Math.sin(-relAngles.yaw);
-    const cp = Math.cos(-relAngles.pitch), sp = Math.sin(-relAngles.pitch);
-    const cr = Math.cos(-relAngles.roll), sr = Math.sin(-relAngles.roll);
-
-    // Rotation order: roll (Z), pitch (X), yaw (Y). Combine by matrices or apply sequentially.
-    // Apply yaw inverse (Y), then pitch inverse (X), then roll inverse (Z):
-    // Start with (x_w, y_w, z_w)
-    // After yaw inverse (rotation about Y):
-    let x1 = cy * x_w + sy * z_w;
-    let z1 = -sy * x_w + cy * z_w;
-    let y1 = y_w;
-    // After pitch inverse (rotation about X):
-    let y2 = cp * y1 - sp * z1;
-    let z2 = sp * y1 + cp * z1;
-    let x2 = x1;
-    // After roll inverse (rotation about Z):
-    let x3 = cr * x2 - sr * y2;
-    let y3 = sr * x2 + cr * y2;
-    let z3 = z2;
-
-    // Now z3 is forward axis in camera space. If z3 >= 0 (behind camera), it's not visible.
-    if (z3 >= 0) return { visible:false };
-
-    // Perspective projection:
-    const focal = projParams.focal;
-    const sx = projParams.cx + (focal * (x3 / -z3));
-    const sy = projParams.cy + (focal * (y3 / -z3));
-
-    // compute apparent angle between HUD center and this point; judge visibility by angle
-    const yawAngle = Math.atan2(x3, -z3); // radians
-    const pitchAngle = Math.atan2(y3, -z3); // radians
-
-    return { visible:true, x:sx, y:sy, z:-z3, yawAngle, pitchAngle };
-  }
-
-  // ---------- HUD world setup ----------
-  // HUD plane center in world coordinates: in front of user at depth HUD_DEPTH_METERS
-  const hudCenterWorld = { x:0, y:0, z:-HUD_DEPTH_METERS };
-
-  // Convert an element rect in HUD plane (meters) into screen rect by projecting its four corners per eye.
-  function projectHudElement(el, relAngles, projParams, eyeOffsetMeters){
-    // element center in HUD plane is el.x, el.y (meters), plane z = hudCenterWorld.z
-    const halfW = el.w / 2, halfH = el.h / 2;
-    // four corners in world coords (local HUD coords)
-    const corners = [
-      { x: el.x - halfW, y: el.y - halfH, z: hudCenterWorld.z },
-      { x: el.x + halfW, y: el.y - halfH, z: hudCenterWorld.z },
-      { x: el.x + halfW, y: el.y + halfH, z: hudCenterWorld.z },
-      { x: el.x - halfW, y: el.y + halfH, z: hudCenterWorld.z }
-    ];
-    // project corners
-    const pts = corners.map(c => projectHudPoint(c, relAngles, projParams, eyeOffsetMeters));
-    // if any corner is behind camera or not visible, treat appropriately
-    if (pts.some(p => !p.visible)) return { visible:false };
-
-    const xs = pts.map(p=>p.x), ys = pts.map(p=>p.y);
-    const left = Math.min(...xs), right = Math.max(...xs), top = Math.min(...ys), bottom = Math.max(...ys);
-    const cx = (left+right)/2, cy = (top+bottom)/2;
-    // compute center angle to determine if entire element is outside angle threshold
-    const centerProj = projectHudPoint({ x: el.x, y: el.y, z: hudCenterWorld.z }, relAngles, projParams, eyeOffsetMeters);
-    if (!centerProj.visible) return { visible:false };
-    // Check angle threshold
-    const yawDeg = Math.abs(toDeg(centerProj.yawAngle));
-    const pitchDeg = Math.abs(toDeg(centerProj.pitchAngle));
-    if (yawDeg > HUD_VISIBLE_ANGLE_DEG || pitchDeg > HUD_VISIBLE_ANGLE_DEG) return { visible:false };
-
-    return { visible:true, left, right, top, bottom, cx, cy, depth:centerProj.z };
-  }
-
-  // ---------- Drawing HUD into canvas per eye ----------
-  // draws entire HUD (buttons + slider) using projection for given eye context
-  function drawHudIntoEye(ctx, canvasW, canvasH, relAngles, eyeOffsetMeters){
-    const projParams = getProjectionParams(canvasW, canvasH, HUD_FOV_HORIZONTAL_DEG);
-    // draw a faded background behind hud center if visible
-    // project HUD rect (entire plane area) for background sizing
-    const planeRect = { x:0, y:0, w:HUD_WIDTH_METERS, h:HUD_HEIGHT_METERS };
-    const planeBox = projectHudElement({ ...planeRect, x:0, y:0 }, relAngles, projParams, eyeOffsetMeters);
-    if (!planeBox.visible) return false;
-    // background rounded rect centered at planeBox.cx, planeBox.cy with scaled size
-    const bgW = planeBox.right - planeBox.left;
-    const bgH = planeBox.bottom - planeBox.top;
-    ctx.save();
-    // background
-    ctx.globalAlpha = 0.85;
-    roundRect(ctx, planeBox.cx - bgW/2, planeBox.cy - bgH/2, bgW, bgH, Math.min(bgH, 12), true, false);
-    ctx.globalAlpha = 1;
-    // draw elements
-    for (let el of hudElements){
-      const projected = projectHudElement(el, relAngles, projParams, eyeOffsetMeters);
-      if (!projected.visible) continue;
-      // draw
-      const elW = projected.right - projected.left;
-      const elH = projected.bottom - projected.top;
-      // button background
-      ctx.fillStyle = 'rgba(30,30,30,0.9)';
-      roundRect(ctx, projected.left, projected.top, elW, elH, 8, true, false);
-      // border
-      ctx.strokeStyle = 'rgba(255,255,255,0.06)';
-      ctx.lineWidth = Math.max(1, elH*0.04);
-      ctx.stroke();
-      // label
-      ctx.fillStyle = '#fff';
-      ctx.font = `${Math.max(10, Math.round(elH*0.36))}px sans-serif`;
-      ctx.textBaseline = 'middle';
-      ctx.textAlign = 'center';
-      ctx.fillText(el.label, projected.cx, projected.cy);
-      // special draw for slider
-      if (el.type === 'slider'){
-        // compute slider track and thumb based on zoomFactor
-        const trackW = elW * 0.9;
-        const trackH = Math.max(6, elH*0.18);
-        const trackX = projected.cx - trackW/2;
-        const trackY = projected.bottom - elH*0.28 - trackH/2;
-        // track
-        ctx.fillStyle = 'rgba(255,255,255,0.08)';
-        roundRect(ctx, trackX, trackY, trackW, trackH, trackH/2, true, false);
-        // filled
-        const t = (zoomFactor - el.min) / (el.max - el.min);
-        ctx.fillStyle = 'rgba(255,255,255,0.28)';
-        roundRect(ctx, trackX, trackY, trackW * t, trackH, trackH/2, true, false);
-        // thumb
-        const thumbX = trackX + trackW * t;
-        const thumbR = Math.max(8, elH*0.18);
-        ctx.beginPath();
-        ctx.fillStyle = 'rgba(255,255,255,0.95)';
-        ctx.arc(thumbX, trackY + trackH/2, thumbR, 0, Math.PI*2);
-        ctx.fill();
-      }
-    }
-    ctx.restore();
-    return true;
-  }
-
-  // ---------- Utility drawing helpers ----------
-  function roundRect(ctx,x,y,w,h,r,fill,stroke){
-    if (typeof r==='undefined') r=6;
-    ctx.beginPath();
-    ctx.moveTo(x+r,y);
-    ctx.arcTo(x+w,y,x+w,y+h,r);
-    ctx.arcTo(x+w,y+h,x,y+h,r);
-    ctx.arcTo(x,y+h,x,y,r);
-    ctx.arcTo(x,y,x+w,y,r);
-    ctx.closePath();
-    if (fill){ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fill();}
-    if (stroke) ctx.stroke();
-  }
-
-  // ---------- Interaction: determine if center gaze hits any HUD element in this eye ----------
-  function hitTestEye(relAngles, projParams, eyeOffsetMeters){
-    // return first hit element (by order) or null
-    for (let el of hudElements){
-      const proj = projectHudElement(el, relAngles, projParams, eyeOffsetMeters);
-      if (!proj.visible) continue;
-      const cx = proj.cx, cy = proj.cy;
-      // Use canvas center as gaze position
-      const gazeX = projParams.cx, gazeY = projParams.cy;
-      if (gazeX >= proj.left && gazeX <= proj.right && gazeY >= proj.top && gazeY <= proj.bottom){
-        return { el, proj };
-      }
-    }
-    return null;
-  }
-
-  // ---------- Render loop ----------
-  function renderLoop(){
-    // draw video into both canvases as centered square, apply zoomFactor
-    if (video.readyState >= 2){
-      const vw = video.videoWidth, vh = video.videoHeight;
-      if (vw && vh){
-        const size = Math.min(vw, vh);
-        const sx = Math.round((vw - size)/2);
-        const sy = Math.round((vh - size)/2);
-        // left eye
-        drawVideoIntoCanvas(lctx, leftCanvas, video, sx, sy, size, zoomFactor);
-        drawOverlayForEye(lctx, leftCanvas, -IPD_METERS/2);
-        // right eye
-        drawVideoIntoCanvas(rctx, rightCanvas, video, sx, sy, size, zoomFactor);
-        drawOverlayForEye(rctx, rightCanvas, IPD_METERS/2);
-      }
-    }
-    requestAnimationFrame(renderLoop);
-  }
-
-  function drawVideoIntoCanvas(ctx, canvas, vid, sx, sy, size, zoom){
-    const cw = canvas.width / (window.devicePixelRatio||1);
-    const ch = canvas.height / (window.devicePixelRatio||1);
-    ctx.clearRect(0,0,cw,ch);
-    // Apply zoom by scaling dw/dh relative to cw,ch
-    const dw = cw * zoom;
-    const dh = ch * zoom;
-    const dx = (cw - dw)/2;
-    const dy = (ch - dh)/2;
-    ctx.drawImage(vid, sx, sy, size, size, dx, dy, dw, dh);
-  }
-
-  function drawOverlayForEye(ctx, canvas, eyeOffsetMeters){
-    const cw = canvas.width / (window.devicePixelRatio||1);
-    const ch = canvas.height / (window.devicePixelRatio||1);
-    // compute projection params
-    const proj = getProjectionParams(cw, ch, HUD_FOV_HORIZONTAL_DEG);
-
-    // compute relative angles between current orientation and reference
-    const relAngles = computeRelAngles();
-
-    // draw HUD only if hudVisible and projected center is in view
-    if (hudVisible && gotOrientation && reference){
-      const visible = drawHudIntoEye(ctx, cw, ch, relAngles, eyeOffsetMeters);
-      // crosshair logic per-eye: if HUD visible and either alwaysOnCrosshair || hudVisible then show crosshair
-      const sh
+startBtn.onclick = async ()=>{
+  await startCamera();
+  await initOrientation();
+};
+</script>
+</body>
+</html>
