@@ -31,10 +31,9 @@ html, body {
   position: relative;
   width: 45%;
   aspect-ratio: 1/1;
-  margin: 0 10px;
+  margin: 0 20px;
   overflow: hidden;
   background: #000;
-  border: 1px solid #222;
   border-radius: 16px;
 }
 
@@ -122,8 +121,8 @@ const xaxisSlider = document.getElementById('xaxis-slider');
 let currentYaw = 0, currentPitch = 0;
 let menuYaw = 0, menuPitch = 0;
 let menuSpawned = false;
-
 let menuPos = {xL:0, yL:0, xR:0, yR:0};
+
 const yawMultiplier = 1.0;
 const pitchMultiplier = 1.5;
 const smoothing = 0.25;
@@ -131,7 +130,7 @@ const baseGap = 20;
 const defaultWidth = 45;
 let xOffset = 0;
 
-// Camera
+// Start camera
 async function startCamera() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -140,7 +139,7 @@ async function startCamera() {
     });
     leftEye.srcObject = stream;
     rightEye.srcObject = stream;
-    leftEye.onloadedmetadata = rightEye.onloadedmetadata = () => { leftEye.play(); rightEye.play(); };
+    leftEye.onloadedmetadata = rightEye.onloadedmetadata = ()=>{ leftEye.play(); rightEye.play(); };
   } catch(err){ alert("Camera access denied."); console.error(err);}
 }
 startCamera();
@@ -176,7 +175,7 @@ window.addEventListener('deviceorientation', e=>{
   }
 });
 
-// Double tap detection
+// Double tap to spawn menu
 let lastTap = 0;
 window.addEventListener('touchend', e=>{
   const now = new Date().getTime();
@@ -193,13 +192,13 @@ function spawnMenu(){
 // Lerp helper
 function lerp(a,b,t){ return a+(b-a)*t; }
 
-// Menu position projection (world-locked)
+// Menu position projection
 function updateMenuPosition(){
-  const fov = 100; 
+  const fov = 100;
   const vFov = 80;
 
-  const deltaYaw = ((menuYaw - currentYaw + 540) % 360) - 180;
-  const deltaPitch = menuPitch - currentPitch;
+  const deltaYaw = menuYaw - currentYaw;   // horizontal
+  const deltaPitch = menuPitch - currentPitch; // vertical
 
   const lRect = leftContainer.getBoundingClientRect();
   const rRect = rightContainer.getBoundingClientRect();
