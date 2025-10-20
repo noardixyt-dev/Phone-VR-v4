@@ -1,396 +1,78 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no" />
-<title>Quaternion Anchored VR Menu</title>
-<style>
-  :root{ --ctrl-bg: rgba(255,255,255,0.94); --menu-bg: rgba(255,255,255,0.95); }
-  html,body{height:100%;width:100%;margin:0;background:#000;color:#fff;overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none;}
-  #overlay { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; z-index:5000; background:#000; color:#fff; font-size:18px; text-align:center; padding:20px; }
-  #vr { display:flex; width:100%; height:100%; align-items:center; justify-content:center; }
-  .eye { position:relative; width:45%; aspect-ratio:1.5/1; margin:0 18px; overflow:hidden; border-radius:16px; background:#000; box-shadow:0 8px 20px rgba(0,0,0,0.6); }
-  .eye video { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); height:100%; width:auto; object-fit:cover; border-radius:16px; }
-  .menu { position:absolute; width:180px; height:100px; border-radius:12px; background:var(--menu-bg); color:#000; display:flex; align-items:center; justify-content:center; font-weight:700; pointer-events:none; visibility:hidden; box-shadow:0 8px 20px rgba(0,0,0,0.25); }
-  #fullscreen { position:fixed; top:14px; right:14px; z-index:3000; background:var(--ctrl-bg); border-radius:10px; padding:8px 10px; font-size:16px; color:#000; box-shadow:0 6px 18px rgba(0,0,0,0.2); }
-  #fovLabel { position:fixed; top:14px; left:14px; z-index:3000; color:#fff; font-weight:700; text-shadow:0 1px 0 rgba(0,0,0,0.5); }
-  #fov { position:fixed; top:46px; left:14px; z-index:3000; width:140px; }
-  @media (orientation:portrait){ body::before{content:"Rotate to landscape"; position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); font-size:20px; color:#fff;} #vr{display:none;} }
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AR Mixed Reality</title>
+  <style>
+    body { margin: 0; overflow: hidden; }
+    canvas { position: absolute; top: 0; left: 0; }
+  </style>
 </head>
 <body>
+  <canvas id="leftCanvas"></canvas>
+  <canvas id="rightCanvas"></canvas>
 
-<div id="overlay">Tap once to start camera & sensors.<br><small>Then double-tap to spawn/hide the anchored menu, triple-tap to re-anchor.</small></div>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script>
+    let xrSession = null;
+    let renderer, scene, cameraLeft, cameraRight, controller;
+    let leftCanvas = document.getElementById('leftCanvas');
+    let rightCanvas = document.getElementById('rightCanvas');
 
-<div id="vr">
-  <div id="leftEyeWrap" class="eye">
-    <video id="leftVideo" autoplay muted playsinline></video>
-    <div id="menuLeft" class="menu">VR MENU</div>
-  </div>
+    async function initAR() {
+      if (!navigator.xr) {
+        alert("WebXR not supported on this device.");
+        return;
+      }
 
-  <div id="rightEyeWrap" class="eye">
-    <video id="rightVideo" autoplay muted playsinline></video>
-    <div id="menuRight" class="menu">VR MENU</div>
-  </div>
-</div>
+      xrSession = await navigator.xr.requestSession('immersive-ar', {
+        requiredFeatures: ['hit-test'],
+        optionalFeatures: ['local', 'dom-overlay']
+      });
 
-<button id="fullscreen">⤢</button>
-<div id="fovLabel">FOV Slider</div>
-<input id="fov" type="range" min="20" max="60" value="45" />
+      xrSession.addEventListener('end', onSessionEnded);
 
-<script>
-/* ----------------------------
-   Configuration & state
-   ----------------------------*/
-const leftVideo = document.getElementById('leftVideo');
-const rightVideo = document.getElementById('rightVideo');
-const leftWrap = document.getElementById('leftEyeWrap');
-const rightWrap = document.getElementById('rightEyeWrap');
-const menuLeft = document.getElementById('menuLeft');
-const menuRight = document.getElementById('menuRight');
-const overlay = document.getElementById('overlay');
-const fullscreenBtn = document.getElementById('fullscreen');
-const fov = document.getElementById('fov');
+      renderer = new THREE.WebGLRenderer({ canvas: leftCanvas });
+      renderer.autoClear = false;
+      scene = new THREE.Scene();
 
-let cameraStarted = false;
-let menuVisible = false;
+      cameraLeft = new THREE.PerspectiveCamera(90, window.innerWidth / window.innerHeight, 0.1, 1000);
+      cameraRight = new THREE.PerspectiveCamera(90, window.innerWidth / window.innerHeight, 0.1, 1000);
 
-// world-anchor: store a direction vector in world space (normalized)
-let menuWorldDir = [0, 0, -1]; // default forward
-let menuWorldPitch = 0; // optional store if needed
+      controller = renderer.xr.getController(0);
+      xrSession.addEventListener('selectstart', onSelectStart);
 
-// current head orientation quaternion (unit)
-let currentQ = [1,0,0,0]; // w,x,y,z
-let currentYawDeg = 0, currentPitchDeg = 0;
-
-// controls for feel
-let smoothing = 0.16;           // lerp smoothing (0..1) lower = snappier
-let yawSensitivity = 2.4;      // horizontal gain
-let pitchSensitivity = 1.8;    // vertical gain
-const MAX_PITCH_DELTA = 60;    // clamp vertical delta in degrees
-
-// menu pixel targets state
-let menuTarget = { lx:0, ly:0, rx:0, ry:0 };
-let menuPos = { lx:0, ly:0, rx:0, ry:0 };
-
-/* ----------------------------
-   Utility: degrees/radians
-   ----------------------------*/
-const toRad = d => d * Math.PI / 180;
-const toDeg = r => r * 180 / Math.PI;
-
-/* ----------------------------
-   Quaternion helpers (w,x,y,z)
-   ----------------------------*/
-function quatFromEuler(alphaDeg, betaDeg, gammaDeg){
-  // alpha (z), beta (x), gamma (y) in degrees as from deviceorientation
-  const _x = toRad(betaDeg || 0);
-  const _y = toRad(gammaDeg || 0);
-  const _z = toRad(alphaDeg || 0);
-
-  const cX = Math.cos(_x/2), cY = Math.cos(_y/2), cZ = Math.cos(_z/2);
-  const sX = Math.sin(_x/2), sY = Math.sin(_y/2), sZ = Math.sin(_z/2);
-
-  // quaternion (w, x, y, z)
-  const w = cX*cY*cZ - sX*sY*sZ;
-  const x = sX*cY*cZ - cX*sY*sZ;
-  const y = cX*sY*cZ + sX*cY*sZ;
-  const z = cX*cY*sZ + sX*sY*cZ;
-  return [w,x,y,z];
-}
-
-function quatConjugate(q){ return [q[0], -q[1], -q[2], -q[3]]; }
-function quatMultiply(a,b){
-  const [aw,ax,ay,az] = a;
-  const [bw,bx,by,bz] = b;
-  return [
-    aw*bw - ax*bx - ay*by - az*bz,
-    aw*bx + ax*bw + ay*bz - az*by,
-    aw*by - ax*bz + ay*bw + az*bx,
-    aw*bz + ax*by - ay*bx + az*bw
-  ];
-}
-function quatNormalize(q){
-  const l = Math.hypot(q[0],q[1],q[2],q[3]) || 1;
-  return q.map(v=>v/l);
-}
-// rotate vector v (3) by quaternion q
-function rotateVecByQuat(q, v){
-  // v' = q * (0,v) * q^-1
-  const qv = [0, v[0], v[1], v[2]];
-  const qConj = quatConjugate(q);
-  const tmp = quatMultiply(q, qv);
-  const res = quatMultiply(tmp, qConj);
-  return [res[1], res[2], res[3]];
-}
-
-// Convert quaternion to Euler (yaw,pitch,roll) in radians
-function quatToEuler(q){
-  const [w,x,y,z] = q;
-  const ysqr = y*y;
-
-  // roll (x-axis rotation)
-  const t0 = +2.0 * (w * x + y * z);
-  const t1 = +1.0 - 2.0 * (x * x + ysqr);
-  const roll = Math.atan2(t0, t1);
-
-  // pitch (y-axis rotation)
-  let t2 = +2.0 * (w * y - z * x);
-  t2 = t2 > 1 ? 1 : t2;
-  t2 = t2 < -1 ? -1 : t2;
-  const pitch = Math.asin(t2);
-
-  // yaw (z-axis rotation)
-  const t3 = +2.0 * (w * z + x * y);
-  const t4 = +1.0 - 2.0 * (ysqr + z * z);
-  const yaw = Math.atan2(t3, t4);
-
-  return { yaw, pitch, roll };
-}
-
-// build quaternion from yaw,pitch,roll radians (Z-X-Y intrinsic same as device)
-function quatFromYawPitchRollRad(yaw, pitch, roll){
-  // convert order: use same formula but with yaw->z, pitch->x, roll->y? We'll reuse standard:
-  const _x = pitch, _y = roll, _z = yaw;
-  const cX = Math.cos(_x/2), cY = Math.cos(_y/2), cZ = Math.cos(_z/2);
-  const sX = Math.sin(_x/2), sY = Math.sin(_y/2), sZ = Math.sin(_z/2);
-  const w = cX*cY*cZ - sX*sY*sZ;
-  const x = sX*cY*cZ - cX*sY*sZ;
-  const y = cX*sY*cZ + sX*cY*sZ;
-  const z = cX*cY*sZ + sX*sY*cZ;
-  return [w,x,y,z];
-}
-
-/* ----------------------------
-   Orientation handling & remap
-   - Use deviceorientation alpha,beta,gamma
-   - Convert to quaternion currentQ
-   - Build a roll-free quaternion (zero roll) for camera math so menu stays horizon-locked
-   ----------------------------*/
-function handleDeviceOrientation(e){
-  if(e.alpha == null) return;
-
-  // raw values
-  const alpha = e.alpha; // yaw
-  const beta = e.beta;   // pitch (portrait)
-  const gamma = e.gamma; // roll
-
-  // Build quaternion from device Euler (alpha/z, beta/x, gamma/y)
-  let q = quatFromEuler(alpha, beta, gamma);
-  q = quatNormalize(q);
-  currentQ = q;
-
-  // derive yaw/pitch/roll from quaternion (radians)
-  const euler = quatToEuler(q);
-  // yaw in degrees
-  currentYawDeg = normalizeDeg(toDeg(euler.yaw));
-  currentPitchDeg = toDeg(euler.pitch); // radians->deg
-
-  // We'll build a quaternion with same yaw & pitch but zero roll to ignore device roll
-  // Convert to radians, but euler gives yaw,pitch,roll already
-  const qNoRoll = quatFromYawPitchRollRad(euler.yaw, euler.pitch, 0.0);
-  // store qNoRoll normalized
-  const qnr = quatNormalize(qNoRoll);
-
-  // save for use in projection
-  currentQNoRoll = qnr;
-}
-
-/* ----------------------------
-   Spawn anchor: compute world direction vector for menu
-   - When user double-taps, we capture the menu's world direction by rotating the forward vector by current roll-free quat.
-   ----------------------------*/
-function spawnAnchor(){
-  // forward vector in camera coordinates (pointing ahead) - use negative Z
-  const forward = [0, 0, -1];
-  // use roll-free quaternion so menu is horizon-locked
-  // if currentQNoRoll isn't available, fallback to currentQ
-  const q = typeof currentQNoRoll !== 'undefined' ? currentQNoRoll : currentQ;
-  // menuWorldDir is the forward vector rotated by the camera orientation => points to a location in world space
-  menuWorldDir = rotateVecByQuat(q, forward);
-  // store a pitch if you want for vertical anchor (not strictly needed)
-  const e = quatToEuler(q);
-  menuWorldPitch = toDeg(e.pitch);
-}
-
-/* ----------------------------
-   Projection: transform menuWorldDir into camera space and map to screen
-   - Use inverse of roll-free camera quaternion so roll does not rotate menu
-   - camera-space vector = qCameraNoRoll^-1 * menuWorldDir
-   - compute angles: angleX = atan2(v.x, -v.z), angleY = atan2(v.y, -v.z)
-   - map angles to pixels using halfFov mapping
-   ----------------------------*/
-function projectMenuToEye(menuDirWorld, eyeRect){
-  // ensure we have a roll-free camera quaternion
-  const qCam = (typeof currentQNoRoll !== 'undefined') ? currentQNoRoll : currentQ;
-  const qCamInv = quatConjugate(qCam); // for unit quaternions, inverse == conjugate
-  // transform world dir into camera space
-  const camSpace = rotateVecByQuat(qCamInv, menuDirWorld); // or rotate menuDir by inverse
-
-  // if behind camera (z >= 0 because forward is -Z), we can mark behind
-  // camSpace.z near 0 or >0 means behind
-  const z = camSpace[2];
-  const inFront = z < 0;
-
-  // compute angles: horizontal and vertical relative to camera forward
-  // angleX: left/right (radians), angleY: up/down
-  const angleX = Math.atan2(camSpace[0], -camSpace[2]); // left/right
-  const angleY = Math.atan2(camSpace[1], -camSpace[2]); // up/down
-
-  // mapping: assume a horizontal mapping baseline (halfFovDegrees)
-  const halfFovDeg = 90; // mapping basis (tweakable)
-  const halfFovRad = toRad(halfFovDeg);
-
-  // pixel mapping
-  const px = eyeRect.width/2 + (angleX / halfFovRad) * (eyeRect.width/2) * yawSensitivity - 90; // subtract half menu width
-  // clamp vertical mapping with a max pitch angle (avoid runaway)
-  const maxPitchDeg = 60;
-  const angleYPct = angleY / toRad(maxPitchDeg); // normalized -1..1
-  const py = eyeRect.height/2 + (angleY / toRad(maxPitchDeg)) * (eyeRect.height/2) * pitchSensitivity - 50;
-
-  return { x: px, y: py, visible: inFront };
-}
-
-/* ----------------------------
-   Update loop: compute targets then lerp to them
-   ----------------------------*/
-function updateMenuPositionsLerped(){
-  if(!menuVisible) return;
-
-  const rectL = leftWrap.getBoundingClientRect();
-  const rectR = rightWrap.getBoundingClientRect();
-
-  const projL = projectMenuToEye(menuWorldDir, rectL);
-  const projR = projectMenuToEye(menuWorldDir, rectR);
-
-  // if menu behind camera, you can hide it (or let it go behind black borders)
-  if(!projL.visible && !projR.visible){
-    // hide for both eyes (optional)
-    menuLeft.style.visibility = 'hidden';
-    menuRight.style.visibility = 'hidden';
-    return;
-  } else {
-    menuLeft.style.visibility = 'visible';
-    menuRight.style.visibility = 'visible';
-  }
-
-  // lerp targets
-  menuPos.lx = lerp(menuPos.lx || projL.x, projL.x, smoothing);
-  menuPos.ly = lerp(menuPos.ly || projL.y, projL.y, smoothing);
-  menuPos.rx = lerp(menuPos.rx || projR.x, projR.x, smoothing);
-  menuPos.ry = lerp(menuPos.ry || projR.y, projR.y, smoothing);
-
-  // apply
-  menuLeft.style.left = `${menuPos.lx}px`;
-  menuLeft.style.top  = `${menuPos.ly}px`;
-  menuRight.style.left = `${menuPos.rx}px`;
-  menuRight.style.top  = `${menuPos.ry}px`;
-}
-
-/* ----------------------------
-   Small RAF loop (keeps UI snappy independent of event frequency)
-   ----------------------------*/
-(function frame(){
-  updateMenuPositionsLerped();
-  requestAnimationFrame(frame);
-})();
-
-/* ----------------------------
-   Wiring: deviceorientation events and tap handlers
-   ----------------------------*/
-window.addEventListener('deviceorientation', (e)=> {
-  handleDeviceOrientation(e);
-}, true);
-
-// double/triple tap logic
-let lastTap = 0, taps = 0;
-window.addEventListener('touchend', (ev)=>{
-  const now = Date.now();
-  if(now - lastTap < 300) taps++; else taps = 1;
-  lastTap = now;
-
-  if(taps === 2){
-    // double tap: toggle
-    if(!menuVisible){
-      // spawn anchor in world
-      spawnAnchor();
-      menuVisible = true;
-      // initialize position to center quickly
-      const rL = leftWrap.getBoundingClientRect();
-      const rR = rightWrap.getBoundingClientRect();
-      menuPos.lx = rL.width/2 - 90;
-      menuPos.ly = rL.height/2 - 50;
-      menuPos.rx = rR.width/2 - 90;
-      menuPos.ry = rR.height/2 - 50;
-      menuLeft.style.visibility = 'visible';
-      menuRight.style.visibility = 'visible';
-    } else {
-      menuVisible = false;
-      menuLeft.style.visibility = 'hidden';
-      menuRight.style.visibility = 'hidden';
+      animate();
     }
-  } else if(taps === 3){
-    // triple tap: re-anchor to current view (move anchor)
-    spawnAnchor();
-    taps = 0;
-  }
-  // clear taps after short delay
-  setTimeout(()=>{ if(Date.now() - lastTap > 350) taps = 0; }, 400);
-}, {passive:true});
 
-/* ----------------------------
-   Small helpers
-   ----------------------------*/
-function normalizeDeg(d){ d = d % 360; if(d < 0) d += 360; return d; }
-function lerp(a,b,t){ return (a === undefined ? b : a + (b - a) * t); }
+    function animate() {
+      if (xrSession) {
+        xrSession.requestAnimationFrame(animate);
+      }
 
-/* ----------------------------
-   Camera start (unique user gesture)
-   ----------------------------*/
-overlay.addEventListener('click', startOnce, { once:true });
-overlay.addEventListener('touchstart', startOnce, { once:true, passive:true });
+      renderer.render(scene, cameraLeft);
+      renderer.render(scene, cameraRight);
+    }
 
-async function startOnce(){
-  overlay.style.display = 'none';
-  try{
-    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width:{ideal:1920}, height:{ideal:1080} }, audio:false });
-    leftVideo.srcObject = stream;
-    rightVideo.srcObject = stream;
-    await leftVideo.play().catch(()=>{});
-    await rightVideo.play().catch(()=>{});
-    cameraStarted = true;
-  }catch(err){
-    console.error('camera start failed', err);
-    alert('Camera permission required.');
-  }
-}
+    function onSelectStart(event) {
+      // Handle model placement
+    }
 
-/* ----------------------------
-   FOV slider wiring
-   ----------------------------*/
-fov.addEventListener('input', ()=>{
-  const pct = Number(fov.value);
-  leftWrap.style.width = pct + '%';
-  rightWrap.style.width = pct + '%';
-  const gap = 20 * (pct / 45);
-  leftWrap.style.margin = `0 ${gap/2}px`;
-  rightWrap.style.margin = `0 ${gap/2}px`;
-});
-fov.dispatchEvent(new Event('input'));
+    function onSessionEnded() {
+      xrSession = null;
+      renderer.dispose();
+    }
 
-/* ----------------------------
-   Fullscreen wiring
-   ----------------------------*/
-fullscreenBtn.addEventListener('click', async ()=>{
-  try{
-    if(document.fullscreenElement) await document.exitFullscreen();
-    else await document.documentElement.requestFullscreen();
-  }catch(e){}
-});
+    window.addEventListener('resize', () => {
+      leftCanvas.width = rightCanvas.width = window.innerWidth;
+      leftCanvas.height = rightCanvas.height = window.innerHeight;
+      cameraLeft.aspect = cameraRight.aspect = window.innerWidth / window.innerHeight;
+      cameraLeft.updateProjectionMatrix();
+      cameraRight.updateProjectionMatrix();
+    });
 
-/* ----------------------------
-   End of file
-   ----------------------------*/
-</script>
+    initAR();
+  </script>
 </body>
 </html>
