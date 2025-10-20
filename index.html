@@ -30,16 +30,18 @@ html, body {
   position: relative;
   width: 45%;
   aspect-ratio: 1/1;
-  margin: 0 5px;
+  margin: 0 10px; /* initial gap, will be updated dynamically */
   overflow: hidden;
   background: #000;
   border: 1px solid #222;
+  border-radius: 16px; /* rounded corners */
 }
 
 .eye-container video {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  border-radius: 16px; /* rounded video inside container */
 }
 
 .menu {
@@ -118,9 +120,9 @@ let menuSpawned = false;
 
 let menuPos = {xL:0, yL:0, xR:0, yR:0};
 const offsetMultiplier = 1.5;
-const smoothing = 0.25; // faster than before
+const smoothing = 0.25;
 
-const baseGap = 10;
+const baseGap = 20; // updated gap
 const defaultWidth = 45;
 
 // Start camera automatically
@@ -197,10 +199,7 @@ function updateMenuPosition() {
   const fov = 100;
   const vFov = 80;
 
-  // fully tracked menu: opposite to head motion
   const yawOffset = -(((menuYaw - currentYaw + 540) % 360) - 180) * offsetMultiplier;
-
-  // Correct vertical tracking using beta relative to spawn
   const pitchOffset = -(menuPitch - currentPitch) * offsetMultiplier;
 
   const lRect = leftContainer.getBoundingClientRect();
