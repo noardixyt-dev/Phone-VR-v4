@@ -28,9 +28,9 @@
 
   .eye-container {
     position: relative;
-    width: 28%;        /* smaller square for better FOV */
+    width: 35%;
     aspect-ratio: 1/1;
-    margin: 0 5px;     /* gap between eyes */
+    margin: 0 8px;
     overflow: hidden;
     background: #000;
     border: 1px solid #222;
@@ -39,7 +39,7 @@
   .eye-container video {
     width: 100%;
     height: 100%;
-    object-fit: cover;  /* zoom video to fill square, crop sides */
+    object-fit: cover;
   }
 
   .menu {
@@ -57,16 +57,18 @@
     visibility: hidden;
   }
 
-  #fullscreen-btn {
+  #fullscreen-btn, #scale-slider {
     position: absolute;
     top: 20px;
-    right: 20px;
     padding: 10px 16px;
     background: rgba(255,255,255,0.9);
     border-radius: 8px;
     font-size: 16px;
     z-index: 1000;
   }
+
+  #fullscreen-btn { right: 80px; }
+  #scale-slider { right: 20px; width: 150px; }
 
   @media screen and (orientation: portrait) {
     body::before {
@@ -97,6 +99,7 @@
 </div>
 
 <button id="fullscreen-btn">Fullscreen</button>
+<input type="range" id="scale-slider" min="20" max="50" value="35">
 
 <script>
 const leftEye = document.getElementById('left-eye');
@@ -106,6 +109,7 @@ const rightContainer = document.getElementById('right-eye-container');
 const menuLeft = document.getElementById('menu-left');
 const menuRight = document.getElementById('menu-right');
 const fullscreenBtn = document.getElementById('fullscreen-btn');
+const scaleSlider = document.getElementById('scale-slider');
 
 let currentYaw = 0;
 let currentPitch = 0;
@@ -113,24 +117,21 @@ let menuYaw = 0;
 let menuPitch = 0;
 let menuSpawned = false;
 
-// Start camera automatically at high resolution
+let menuPos = {xL:0, yL:0, xR:0, yR:0}; // smoothed positions
+const offsetMultiplier = 1.5;
+const smoothing = 0.1; // smaller = faster, larger = smoother
+
+// Start camera automatically
 async function startCamera() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        width: { ideal: 3840 },
-        height: { ideal: 2160 },
-        facingMode: 'environment'
-      },
+      video: { width: {ideal:3840}, height:{ideal:2160}, facingMode:'environment' },
       audio: false
     });
     leftEye.srcObject = stream;
     rightEye.srcObject = stream;
-
-    // Force video to play on mobile
     leftEye.onloadedmetadata = () => leftEye.play();
     rightEye.onloadedmetadata = () => rightEye.play();
-
   } catch(err) {
     console.error("Camera error:", err);
     alert("Could not access camera. Please allow permissions.");
@@ -139,16 +140,20 @@ async function startCamera() {
 
 startCamera();
 
-// Fullscreen button
+// Fullscreen
 fullscreenBtn.addEventListener('click', () => {
-  if(document.fullscreenElement) {
-    document.exitFullscreen();
-  } else {
-    document.documentElement.requestFullscreen();
-  }
+  if(document.fullscreenElement) document.exitFullscreen();
+  else document.documentElement.requestFullscreen();
 });
 
-// Device orientation tracking
+// Eye scale slider
+scaleSlider.addEventListener('input', () => {
+  const scale = scaleSlider.value + '%';
+  leftContainer.style.width = scale;
+  rightContainer.style.width = scale;
+});
+
+// Device orientation
 window.addEventListener('deviceorientation', (event) => {
   if(event.alpha !== null && event.beta !== null){
     currentYaw = event.alpha;
@@ -177,33 +182,36 @@ function spawnMenu(){
   menuRight.style.visibility = "visible";
 }
 
+function lerp(a, b, t){ return a + (b - a) * t; }
+
 function updateMenuPosition() {
-  const fov = 100;  // horizontal FOV
-  const vFov = 80;  // vertical FOV
+  const fov = 100;
+  const vFov = 80;
 
-  // World-locked offsets
-  let yawOffset = ((menuYaw - currentYaw + 540) % 360) - 180;
-  yawOffset = -yawOffset; // invert so menu stays fixed
-
-  let pitchOffset = menuPitch - currentPitch;
-  pitchOffset = -pitchOffset; // invert so menu stays fixed
+  let yawOffset = -(((menuYaw - currentYaw + 540) % 360) - 180) * offsetMultiplier;
+  let pitchOffset = -(menuPitch - currentPitch) * offsetMultiplier;
 
   const visible = Math.abs(yawOffset) <= fov/2 && Math.abs(pitchOffset) <= vFov/2;
 
   if(visible){
-    // Left eye
     const lRect = leftContainer.getBoundingClientRect();
-    let xL = (lRect.width/2) + (yawOffset/(fov/2))*(lRect.width/2) - menuLeft.offsetWidth/2;
-    let yL = (lRect.height/2) + (pitchOffset/(vFov/2))*(lRect.height/2) - menuLeft.offsetHeight/2;
-    menuLeft.style.left = xL + "px";
-    menuLeft.style.top = yL + "px";
-
-    // Right eye
     const rRect = rightContainer.getBoundingClientRect();
-    let xR = (rRect.width/2) + (yawOffset/(fov/2))*(rRect.width/2) - menuRight.offsetWidth/2;
-    let yR = (rRect.height/2) + (pitchOffset/(vFov/2))*(rRect.height/2) - menuRight.offsetHeight/2;
-    menuRight.style.left = xR + "px";
-    menuRight.style.top = yR + "px";
+
+    let targetXL = (lRect.width/2) + (yawOffset/(fov/2))*(lRect.width/2) - menuLeft.offsetWidth/2;
+    let targetYL = (lRect.height/2) + (pitchOffset/(vFov/2))*(lRect.height/2) - menuLeft.offsetHeight/2;
+    let targetXR = (rRect.width/2) + (yawOffset/(fov/2))*(rRect.width/2) - menuRight.offsetWidth/2;
+    let targetYR = (rRect.height/2) + (pitchOffset/(vFov/2))*(rRect.height/2) - menuRight.offsetHeight/2;
+
+    // smoothing
+    menuPos.xL = lerp(menuPos.xL, targetXL, smoothing);
+    menuPos.yL = lerp(menuPos.yL, targetYL, smoothing);
+    menuPos.xR = lerp(menuPos.xR, targetXR, smoothing);
+    menuPos.yR = lerp(menuPos.yR, targetYR, smoothing);
+
+    menuLeft.style.left = menuPos.xL + "px";
+    menuLeft.style.top = menuPos.yL + "px";
+    menuRight.style.left = menuPos.xR + "px";
+    menuRight.style.top = menuPos.yR + "px";
 
     menuLeft.style.visibility = "visible";
     menuRight.style.visibility = "visible";
