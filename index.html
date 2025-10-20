@@ -5,67 +5,87 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>VR Camera Test</title>
 <style>
-  html,body {margin:0; height:100%; background:black; overflow:hidden; font-family:sans-serif;}
-  #container {display:flex; justify-content:center; align-items:center; height:100%; width:100%; position:relative;}
-  video {object-fit:cover; width:45vw; height:45vw; border-radius:12px; background:#000;}
-  #videoLeft {margin-right:2vw;}
-  #videoRight {margin-left:2vw;}
-  .menu {
-    position:absolute;
-    background:rgba(0,0,0,0.6);
-    color:white;
-    padding:10px 20px;
-    border-radius:12px;
-    font-size:16px;
-    backdrop-filter:blur(6px);
-    pointer-events:none;
-  }
-  #controls {
-    position:fixed; bottom:12px; left:50%;
-    transform:translateX(-50%);
-    z-index:10; display:flex; gap:12px;
-  }
-  button {
-    background: rgba(255,255,255,0.15);
-    color:white; border:none;
-    padding:10px 14px; border-radius:10px;
-    font-size:15px; backdrop-filter:blur(4px);
-  }
-  button:hover {background: rgba(255,255,255,0.25);}
+html, body {margin:0; height:100%; background:black; overflow:hidden; font-family:sans-serif;}
+#container {display:flex; justify-content:center; align-items:center; height:100%; width:100%; position:relative;}
+canvas {background:#000; border-radius:12px;}
+#canvasLeft {margin-right:4vw;}
+#canvasRight {margin-left:4vw;}
+canvas.small {width:40vw; height:40vw;} /* smaller than screen */
+.menu {
+  position:absolute;
+  background:rgba(0,0,0,0.6);
+  color:white;
+  padding:10px 20px;
+  border-radius:12px;
+  font-size:16px;
+  backdrop-filter:blur(6px);
+  pointer-events:none;
+  display:none;
+}
+#controls {
+  position:fixed; bottom:12px; left:50%;
+  transform:translateX(-50%);
+  z-index:10; display:flex; gap:12px;
+}
+button {
+  background: rgba(255,255,255,0.15);
+  color:white; border:none;
+  padding:10px 14px; border-radius:10px;
+  font-size:15px; backdrop-filter:blur(4px);
+}
+button:hover {background: rgba(255,255,255,0.25);}
 </style>
 </head>
 <body>
 <div id="container">
-  <video id="videoLeft" autoplay playsinline muted></video>
-  <video id="videoRight" autoplay playsinline muted></video>
+  <canvas id="canvasLeft" class="small"></canvas>
+  <canvas id="canvasRight" class="small"></canvas>
+  <div class="menu" id="menuLeft">TEST</div>
+  <div class="menu" id="menuRight">TEST</div>
 </div>
-<div class="menu" id="menuLeft" style="display:none;">TEST</div>
-<div class="menu" id="menuRight" style="display:none;">TEST</div>
-
 <div id="controls">
   <button id="startBtn">Start Camera</button>
   <button id="fullscreenBtn">Fullscreen</button>
 </div>
 
 <script>
-const videoLeft = document.getElementById('videoLeft');
-const videoRight = document.getElementById('videoRight');
-const startBtn = document.getElementById('startBtn');
-const fullscreenBtn = document.getElementById('fullscreenBtn');
+const canvasLeft = document.getElementById('canvasLeft');
+const canvasRight = document.getElementById('canvasRight');
+const ctxLeft = canvasLeft.getContext('2d');
+const ctxRight = canvasRight.getContext('2d');
 const menuLeft = document.getElementById('menuLeft');
 const menuRight = document.getElementById('menuRight');
+const startBtn = document.getElementById('startBtn');
+const fullscreenBtn = document.getElementById('fullscreenBtn');
 
+let videoStream;
 let menuVisible = false;
-let refOrientation = null;
-let menuOffset = {x:0, y:0, z:2}; // 2 meters in front
 
-// Start camera
+// Start camera and draw to canvas
 async function startCamera(){
   try{
-    const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}, audio:false});
-    videoLeft.srcObject = stream;
-    videoRight.srcObject = stream;
+    videoStream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}, audio:false});
+    const video = document.createElement('video');
+    video.srcObject = videoStream;
+    video.autoplay = true;
+    video.playsInline = true;
+    video.muted = true;
+
+    video.onloadedmetadata = ()=>{
+      video.play();
+      drawLoop(video);
+    };
   }catch(e){alert("Camera access failed: "+e.message);}
+}
+
+// Draw the video feed to both eye canvases
+function drawLoop(video){
+  const draw = ()=>{
+    ctxLeft.drawImage(video, 0, 0, canvasLeft.width, canvasLeft.height);
+    ctxRight.drawImage(video, 0, 0, canvasRight.width, canvasRight.height);
+    requestAnimationFrame(draw);
+  };
+  draw();
 }
 
 // Fullscreen
@@ -77,62 +97,36 @@ fullscreenBtn.onclick = ()=>{
   }
 };
 
-// Handle device orientation
-function handleOrientation(e){
-  if(!refOrientation) return;
-  const alpha = e.alpha - refOrientation.alpha;
-  const beta  = e.beta  - refOrientation.beta;
-  const gamma = e.gamma - refOrientation.gamma;
-
-  // Compute pixel offset for menu relative to screen center
-  const maxShift = 100;
-  const xShift = Math.max(-maxShift, Math.min(maxShift, gamma*1.5));
-  const yShift = Math.max(-maxShift, Math.min(maxShift, beta*1.2));
-
-  if(menuVisible){
-    menuLeft.style.transform = `translate(calc(-50% + ${xShift}px), calc(-50% + ${yShift}px))`;
-    menuRight.style.transform = `translate(calc(-50% + ${xShift}px), calc(-50% + ${yShift}px))`;
-  }
-}
-
-// Request motion permission (iOS)
-async function initOrientation(){
-  if(typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function"){
-    const permissionState = await DeviceOrientationEvent.requestPermission();
-    if(permissionState==="granted"){
-      window.addEventListener('deviceorientation', handleOrientation);
-      refOrientation = {alpha:0,beta:0,gamma:0};
-      window.addEventListener('deviceorientation', (e)=>{if(!refOrientation) refOrientation={alpha:e.alpha,beta:e.beta,gamma:e.gamma};});
-    } else alert("Motion permission denied");
-  } else {
-    window.addEventListener('deviceorientation', handleOrientation);
-    window.addEventListener('deviceorientation', (e)=>{if(!refOrientation) refOrientation={alpha:e.alpha,beta:e.beta,gamma:e.gamma};});
-  }
-}
-
-// Double tap detection
+// Double-tap to toggle menu
 let lastTap = 0;
-document.body.addEventListener('touchend', (e)=>{
+document.body.addEventListener('touchend', ()=>{
   const now = Date.now();
   if(now - lastTap < 300){
-    // double tap detected
     menuVisible = !menuVisible;
     menuLeft.style.display = menuVisible?'block':'none';
     menuRight.style.display = menuVisible?'block':'none';
-    if(menuVisible && !refOrientation){
-      // capture reference orientation at spawn
-      window.addEventListener('deviceorientation', (ev)=>{
-        if(!refOrientation) refOrientation={alpha:ev.alpha,beta:ev.beta,gamma:ev.gamma};
-      }, {once:true});
-    }
+    // center menu over each canvas
+    const rectL = canvasLeft.getBoundingClientRect();
+    const rectR = canvasRight.getBoundingClientRect();
+    menuLeft.style.left = rectL.left + rectL.width/2 + 'px';
+    menuLeft.style.top  = rectL.top  + rectL.height/2 + 'px';
+    menuRight.style.left = rectR.left + rectR.width/2 + 'px';
+    menuRight.style.top  = rectR.top  + rectR.height/2 + 'px';
   }
   lastTap = now;
 });
 
-startBtn.onclick = async ()=>{
-  await startCamera();
-  await initOrientation();
-};
+// Resize canvas to match visual size without downscaling video
+function resizeCanvas(){
+  canvasLeft.width = canvasLeft.clientWidth;
+  canvasLeft.height = canvasLeft.clientHeight;
+  canvasRight.width = canvasRight.clientWidth;
+  canvasRight.height = canvasRight.clientHeight;
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+startBtn.onclick = startCamera;
 </script>
 </body>
 </html>
