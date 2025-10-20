@@ -5,82 +5,24 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>Phone VR Viewer</title>
 <style>
-html, body {
-  margin: 0;
-  padding: 0;
-  overflow: hidden;
-  width: 100%;
-  height: 100%;
-  background: #000;
-  touch-action: none;
-  user-select: none;
-}
-#vr-container {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  width: 100%;
-  height: 100%;
-}
-.eye-container {
-  position: relative;
-  width: 45%;
-  aspect-ratio: 1.5 / 1;
-  margin: 0 20px;
-  overflow: hidden;
-  background: #000;
-  border-radius: 16px;
-}
-.eye-container video {
-  width: auto;
-  height: 100%;
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  object-fit: cover;
-  border-radius: 16px;
-}
-.menu {
-  position: absolute;
-  width: 180px;
-  height: 100px;
-  background: rgba(255,255,255,0.9);
-  border-radius: 12px;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  font-size: 18px;
-  color: #000;
-  pointer-events: none;
-  visibility: hidden;
-}
-#fullscreen-btn, #fov-slider {
-  position: absolute;
-  padding: 6px 10px;
-  background: rgba(255,255,255,0.9);
-  border-radius: 8px;
-  font-size: 14px;
-  z-index: 1000;
-}
-#fullscreen-btn { top: 20px; right: 20px; }
-#fov-slider { top: 20px; left: 20px; width: 140px; }
-#fov-label { top: 50px; left: 20px; color: white; font-size: 14px; font-weight: bold; position: absolute; z-index: 1000;}
+html, body { margin:0; padding:0; overflow:hidden; width:100%; height:100%; background:#000; touch-action:none; user-select:none;}
+#vr-container { display:flex; justify-content:center; align-items:center; width:100%; height:100%; }
+.eye-container { position:relative; width:45%; aspect-ratio:1.5 / 1; margin:0 20px; overflow:hidden; background:#000; border-radius:16px; }
+.eye-container video { width:auto; height:100%; position:absolute; left:50%; transform:translateX(-50%); object-fit:cover; border-radius:16px; }
+.menu { position:absolute; width:180px; height:100px; background:rgba(255,255,255,0.9); border-radius:12px; display:flex; justify-content:center; align-items:center; font-size:18px; color:#000; pointer-events:none; visibility:hidden;}
+#fullscreen-btn, #fov-slider { position:absolute; padding:6px 10px; background:rgba(255,255,255,0.9); border-radius:8px; font-size:14px; z-index:1000; }
+#fullscreen-btn { top:20px; right:20px; }
+#fov-slider { top:20px; left:20px; width:140px; }
+#fov-label { top:50px; left:20px; color:white; font-size:14px; font-weight:bold; position:absolute; z-index:1000;}
+#overlay-start { position:absolute; top:0; left:0; width:100%; height:100%; background:#000; display:flex; justify-content:center; align-items:center; color:white; font-size:24px; text-align:center; z-index:2000; touch-action:none;}
 @media screen and (orientation: portrait) {
-  body::before {
-    content: "Please rotate your device to landscape";
-    color: white;
-    font-size: 2em;
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    text-align: center;
-  }
-  #vr-container { display: none; }
+  body::before { content:"Please rotate your device to landscape"; color:white; font-size:2em; position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); text-align:center;}
+  #vr-container { display:none; }
 }
 </style>
 </head>
 <body>
+<div id="overlay-start">Tap to start camera</div>
 <div id="vr-container">
   <div id="left-eye-container" class="eye-container">
     <video id="left-eye" autoplay muted playsinline></video>
@@ -91,7 +33,6 @@ html, body {
     <div class="menu" id="menu-right">VR Menu</div>
   </div>
 </div>
-
 <button id="fullscreen-btn">Fullscreen</button>
 <label id="fov-label">FOV Slider</label>
 <input type="range" id="fov-slider" min="20" max="50" value="45">
@@ -105,29 +46,26 @@ const menuLeft = document.getElementById('menu-left');
 const menuRight = document.getElementById('menu-right');
 const fullscreenBtn = document.getElementById('fullscreen-btn');
 const fovSlider = document.getElementById('fov-slider');
+const overlay = document.getElementById('overlay-start');
 
 let menuSpawned = false;
-let menuWorldYaw = 0, menuWorldPitch = 0;
-let menuPos = {xL:0, yL:0, xR:0, yR:0};
+let menuWorldYaw = 0;
+let menuPos = {xL:0, xR:0};
 const smoothing = 0.25;
 const horizontalSensitivity = 2.2;
-const verticalSensitivity = 1.5;
 const baseGap = 20;
 const defaultWidth = 45;
 
-// Video stabilization via requestAnimationFrame + canvas
-async function startCamera(){
+// Camera
+overlay.addEventListener('touchstart', async ()=>{
+  overlay.style.display = 'none';
   try{
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { width:{ideal:3840}, height:{ideal:2160}, facingMode:'environment' },
-      audio: false
-    });
+    const stream = await navigator.mediaDevices.getUserMedia({video:{width:{ideal:3840}, height:{ideal:2160}, facingMode:'environment'}, audio:false});
     leftEye.srcObject = stream;
     rightEye.srcObject = stream;
     leftEye.onloadedmetadata = rightEye.onloadedmetadata = ()=>{ leftEye.play(); rightEye.play(); };
-  } catch(err){ alert("Camera access denied."); console.error(err);}
-}
-document.body.addEventListener('touchstart', startCamera, {once:true}); // first tap triggers camera
+  }catch(err){ alert("Camera access denied."); console.error(err);}
+}, {once:true});
 
 // Fullscreen
 fullscreenBtn.addEventListener('click', () => {
@@ -135,12 +73,12 @@ fullscreenBtn.addEventListener('click', () => {
   else document.documentElement.requestFullscreen();
 });
 
-// Eye scaling and gap
-function updateEyeScaleAndGap() {
-  const scale = fovSlider.value + '%';
+// Eye scaling & gap
+function updateEyeScaleAndGap(){
+  const scale = fovSlider.value+'%';
   leftContainer.style.width = scale;
   rightContainer.style.width = scale;
-  const dynamicGap = baseGap * (fovSlider.value / defaultWidth);
+  const dynamicGap = baseGap*(fovSlider.value/defaultWidth);
   leftContainer.style.marginLeft = dynamicGap/2 + "px";
   leftContainer.style.marginRight = dynamicGap/2 + "px";
   rightContainer.style.marginLeft = dynamicGap/2 + "px";
@@ -149,77 +87,56 @@ function updateEyeScaleAndGap() {
 updateEyeScaleAndGap();
 fovSlider.addEventListener('input', updateEyeScaleAndGap);
 
-// Device orientation handling
-let currentYaw = 0, currentPitch = 0;
+// Device orientation
+let currentYaw = 0;
 window.addEventListener('deviceorientation', e=>{
-  if(e.alpha!==null && e.beta!==null && e.gamma!==null){
-    // Landscape mode fix: swap gamma and beta
-    currentYaw = e.alpha; // yaw
-    currentPitch = e.gamma; // gamma acts as pitch in landscape
+  if(e.alpha!==null){
+    currentYaw = e.alpha;
     if(menuSpawned) updateMenuPosition();
   }
 });
 
-// Double tap to toggle menu
-let lastTap = 0;
-let tapCount = 0;
+// Double-tap menu toggle
+let lastTap=0,tapCount=0;
 window.addEventListener('touchend', e=>{
   const now = new Date().getTime();
-  if(now - lastTap < 300){
-    tapCount++;
-    if(tapCount===2){ toggleMenu(); }
-    if(tapCount===3){ /* triple-tap future */ }
-  } else { tapCount = 1; }
-  lastTap = now;
+  if(now-lastTap<300){ tapCount++; if(tapCount===2) toggleMenu(); }
+  else { tapCount=1; }
+  lastTap=now;
 });
 
 function toggleMenu(){
   menuSpawned = !menuSpawned;
-  if(menuSpawned){
-    menuWorldYaw = currentYaw;
-    menuWorldPitch = currentPitch;
-  }
-  menuLeft.style.visibility = menuSpawned ? "visible" : "hidden";
-  menuRight.style.visibility = menuSpawned ? "visible" : "hidden";
+  if(menuSpawned) menuWorldYaw = currentYaw;
+  menuLeft.style.visibility = menuSpawned?"visible":"hidden";
+  menuRight.style.visibility = menuSpawned?"visible":"hidden";
 }
 
 // Lerp helper
 function lerp(a,b,t){ return a+(b-a)*t; }
 
-// Map world yaw/pitch to screen coordinates
-function worldToScreen(menuYaw, menuPitch, rect){
-  let deltaYaw = ((menuYaw - currentYaw + 540) % 360) - 180;
-  let deltaPitch = menuPitch - currentPitch;
-  const x = rect.width/2 - (deltaYaw / 90) * (rect.width/2) * horizontalSensitivity - 90;
-  const y = rect.height/2 - (deltaPitch / 90) * (rect.height/2) * verticalSensitivity - 50;
-  return {x,y};
+// Map world yaw to screen
+function worldToScreen(menuYaw, rect){
+  let deltaYaw = ((menuYaw - currentYaw + 540)%360)-180;
+  const x = rect.width/2 - (deltaYaw/90)*(rect.width/2)*horizontalSensitivity - 90;
+  return x;
 }
 
 function updateMenuPosition(){
   const lRect = leftContainer.getBoundingClientRect();
   const rRect = rightContainer.getBoundingClientRect();
-  const targetL = worldToScreen(menuWorldYaw, menuWorldPitch, lRect);
-  const targetR = worldToScreen(menuWorldYaw, menuWorldPitch, rRect);
-  menuPos.xL = lerp(menuPos.xL, targetL.x, smoothing);
-  menuPos.yL = lerp(menuPos.yL, targetL.y, smoothing);
-  menuPos.xR = lerp(menuPos.xR, targetR.x, smoothing);
-  menuPos.yR = lerp(menuPos.yR, targetR.y, smoothing);
-  menuLeft.style.left = menuPos.xL + "px";
-  menuLeft.style.top = menuPos.yL + "px";
-  menuRight.style.left = menuPos.xR + "px";
-  menuRight.style.top = menuPos.yR + "px";
+  const targetL = worldToScreen(menuWorldYaw, lRect);
+  const targetR = worldToScreen(menuWorldYaw, rRect);
+  menuPos.xL = lerp(menuPos.xL, targetL, smoothing);
+  menuPos.xR = lerp(menuPos.xR, targetR, smoothing);
+  menuLeft.style.left = menuPos.xL+"px";
+  menuLeft.style.top = "10px"; // horizon locked
+  menuRight.style.left = menuPos.xR+"px";
+  menuRight.style.top = "10px"; 
 }
 
-// Placeholder for AR/WebXR future 3D models
-async function startARSession() {
-  if(!navigator.xr) return;
-  try{
-    const session = await navigator.xr.requestSession('immersive-ar', {requiredFeatures:['local-floor']});
-    const refSpace = await session.requestReferenceSpace('local-floor');
-    // Future: render 3D objects anchored in real space
-  } catch(err){ console.log("AR not supported or denied:", err); }
-}
-// startARSession(); // Uncomment to enable WebXR
+// AR/WebXR placeholder
+async function startARSession(){ if(!navigator.xr) return; try{ const session = await navigator.xr.requestSession('immersive-ar',{requiredFeatures:['local-floor']}); const refSpace = await session.requestReferenceSpace('local-floor'); }catch(err){console.log("AR not supported or denied:",err);} }
 </script>
 </body>
 </html>
