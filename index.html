@@ -1,101 +1,548 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>VR Phone Camera HUD</title>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>VR Passthrough — Dual Eye Camera</title>
 <style>
-html,body{height:100%;margin:0;background:#000;color:#fff;font-family:system-ui,-apple-system,sans-serif;overflow:hidden;}
-#container{width:100%;height:100vh;display:flex;align-items:center;justify-content:center;position:relative;gap:20px;}
-canvas{background:#000;border-radius:8px;}
-.menuBtn{background:linear-gradient(135deg,#222,#555);color:#fff;border:none;padding:6px 10px;border-radius:6px;font-size:14px;cursor:pointer;margin:2px;}
-.menuSlider{width:100px;}
-.menuBox{background:rgba(0,0,0,0.7);border-radius:10px;padding:10px;display:flex;flex-direction:row;gap:4px;pointer-events:auto;position:absolute;}
+  :root{
+    --gap: 4vw;           /* gap between eyes */
+    --eye-scale: 0.9;     /* how big each eye window is relative to half-screen height */
+    --eye-aspect: 3/4;    /* width/height aspect ratio for each eye window (3:4) */
+    --bg: #000;
+    --hud-w: 60vw;
+    --hud-h: 10vh;
+  }
+  html,body{
+    height:100%;
+    margin:0;
+    background:var(--bg);
+    color:#fff;
+    font-family:system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+    -webkit-user-select:none;
+    user-select:none;
+    overflow:hidden;
+  }
+  #root{
+    position:relative;
+    width:100%;
+    height:100%;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+  }
+
+  /* container for the two eyes */
+  .eyes {
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap: var(--gap);
+    width:100%;
+    height:100%;
+    padding: 5vh 3vw;
+    box-sizing:border-box;
+    pointer-events:none; /* let touches go to overlay */
+  }
+
+  .eye {
+    position:relative;
+    width: calc( (100% - var(--gap)) / 2 ); /* default to half width minus gap */
+    max-width: 48vw;
+    aspect-ratio: calc(var(--eye-aspect)); /* keep requested aspect ratio (width/height) */
+    background: #111;
+    overflow:hidden;
+    border-radius: 10px;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.8), inset 0 0 60px rgba(255,255,255,0.02);
+    transform-origin: center;
+    pointer-events:auto;
+  }
+
+  /* canvas fills the eye region */
+  canvas.videoCanvas {
+    width:100%;
+    height:100%;
+    display:block;
+  }
+
+  /* HUD that appears for both eyes: we render it in DOM and also draw into canvases */
+  .hud {
+    position: absolute;
+    left: 50%;
+    top: 40%;
+    transform: translate(-50%, -50%);
+    width: var(--hud-w);
+    height: var(--hud-h);
+    min-width:200px;
+    min-height:56px;
+    background: rgba(0,0,0,0.45);
+    border-radius: 12px;
+    backdrop-filter: blur(6px);
+    color:#fff;
+    padding: 10px;
+    display:flex;
+    gap:12px;
+    align-items:center;
+    justify-content:space-between;
+    pointer-events:auto;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.6);
+    user-select:none;
+  }
+
+  .hud.hidden { display:none; }
+  .hud .left { display:flex; gap:8px; align-items:center; }
+  .hud .title { font-weight:600; font-size:1rem; }
+  .hud .controls { display:flex; gap:8px; align-items:center; }
+
+  .button {
+    padding:6px 10px;
+    border-radius:8px;
+    background:rgba(255,255,255,0.06);
+    border:1px solid rgba(255,255,255,0.06);
+    font-size:0.9rem;
+  }
+
+  /* small overlay instructions & status */
+  .status {
+    position: absolute;
+    left: 8px;
+    top: 8px;
+    background: rgba(0,0,0,0.45);
+    padding: 8px 10px;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    pointer-events:none;
+  }
+
+  /* initial tap area (full-screen) to detect double-tap */
+  #touchLayer {
+    position:absolute;
+    inset:0;
+    z-index:20;
+    touch-action:manipulation;
+  }
+
+  /* crosshair for each eye (drawn into canvas) - style hints if needed for DOM */
+  .debug {
+    position:absolute;
+    bottom:8px;
+    right:8px;
+    font-size:12px;
+    background:rgba(0,0,0,0.4);
+    padding:6px 8px;
+    border-radius:8px;
+  }
+
+  /* small guidance if permission is needed */
+  .overlay-permission {
+    position:absolute;
+    inset:0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    z-index:40;
+    background:linear-gradient(0deg, rgba(0,0,0,0.6), rgba(0,0,0,0.2));
+    text-align:center;
+    padding:20px;
+    box-sizing:border-box;
+  }
+
+  .overlay-permission .card {
+    background: rgba(0,0,0,0.7);
+    color:white;
+    padding:18px;
+    border-radius:12px;
+    max-width:360px;
+  }
+
+  /* make the HUD appear on top of eyes */
+  #hudContainer { position:absolute; inset:0; z-index:30; pointer-events:none; }
+  #hudContainer .hud { pointer-events:auto; z-index:35; }
+
+  @media (orientation:landscape) {
+    /* when landscape, ensure eyes remain portrait-ish by controlling sizes */
+    .eye {
+      max-height: 86vh;
+    }
+  }
 </style>
 </head>
 <body>
-<div id="container">
-  <canvas id="left"></canvas>
-  <canvas id="right"></canvas>
+<div id="root">
+  <div class="eyes" id="eyesContainer">
+    <div class="eye" id="leftEye">
+      <canvas class="videoCanvas" id="leftCanvas"></canvas>
+    </div>
+    <div class="eye" id="rightEye">
+      <canvas class="videoCanvas" id="rightCanvas"></canvas>
+    </div>
+  </div>
+
+  <!-- HUD container (single DOM HUD, but we will draw to canvases too so it appears for both eyes) -->
+  <div id="hudContainer" aria-hidden="true">
+    <div class="hud hidden" id="hud">
+      <div class="left">
+        <div class="title">VR HUD</div>
+        <div style="opacity:0.8; font-size:0.9rem;">Passthrough</div>
+      </div>
+      <div class="controls">
+        <div class="button" id="toggleCross">Toggle Crosshair</div>
+        <div class="button" id="centerHUD">Center</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="status" id="status">Double-tap to toggle HUD</div>
+
+  <div id="touchLayer"></div>
+
+  <div class="overlay-permission" id="permissionOverlay" style="display:none;">
+    <div class="card">
+      <div style="font-weight:700; margin-bottom:8px;">Motion permission required</div>
+      <div style="margin-bottom:12px;">This device requires permission to read device orientation so HUD stays stable when you look around. Please allow motion access if prompted.</div>
+      <button id="reqMotion" class="button">Request Motion Permission</button>
+    </div>
+  </div>
 </div>
-<video id="video" autoplay playsinline muted style="display:none"></video>
+
 <script>
-const video=document.getElementById('video');
-const leftCanvas=document.getElementById('left');
-const rightCanvas=document.getElementById('right');
-let stream=null,rafId=null,zoom=1,eyeGap=20;
-let menuVisible=false,menuAngle=0,deviceYaw=0,devicePitch=0,lastTap=0,alwaysShowCrosshair=false;
-const rotCanvas=document.createElement('canvas');
-const rotCtx=rotCanvas.getContext('2d');
-const menuBox=document.createElement('div');menuBox.className='menuBox';
-const startBtn=document.createElement('button');startBtn.className='menuBtn';startBtn.textContent='Start Camera';
-const fsBtn=document.createElement('button');fsBtn.className='menuBtn';fsBtn.textContent='Fullscreen';
-const zoomSlider=document.createElement('input');zoomSlider.type='range';zoomSlider.min='1';zoomSlider.max='2';zoomSlider.step='0.01';zoomSlider.value='1';zoomSlider.className='menuSlider';
-menuBox.appendChild(startBtn);menuBox.appendChild(fsBtn);menuBox.appendChild(zoomSlider);
-document.body.appendChild(menuBox);menuBox.style.display='none';
-async function startCamera(){
-  if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}
-  try{
-    const constraints={video:{facingMode:'environment',width:{ideal:4096},height:{ideal:2160}},audio:false};
-    stream=await navigator.mediaDevices.getUserMedia(constraints);
-    video.srcObject=stream;
-    await video.play();
-    resizeCanvases();
-  }catch(e){alert('Camera error: '+e.message);}
-}
-function toggleFullscreen(){
-  if(!document.fullscreenElement)document.body.requestFullscreen?.();
-  else document.exitFullscreen?.();
-}
-startBtn.onclick=startCamera;
-fsBtn.onclick=toggleFullscreen;
-zoomSlider.oninput=e=>{zoom=parseFloat(e.target.value);};
-function resizeCanvases(){
-  const dpr=window.devicePixelRatio||1;
-  const w=window.innerWidth,h=window.innerHeight;
-  const scale=0.85;
-  const eyeSize=Math.min(w*scale/2,h*scale);
-  [leftCanvas,rightCanvas].forEach(c=>{c.width=c.height=Math.floor(eyeSize*dpr);c.style.width=c.style.height=eyeSize+'px';});
-  leftCanvas.style.left=`calc(50% - ${eyeSize+eyeGap/2}px)`;
-  rightCanvas.style.left=`calc(50% + ${eyeGap/2}px)`;
-  leftCanvas.style.top=rightCanvas.style.top=`calc(50% - ${eyeSize/2}px)`;
-}
-window.addEventListener('resize',resizeCanvases);resizeCanvases();
-window.addEventListener('deviceorientation',e=>{deviceYaw=e.alpha||0;devicePitch=e.beta||0;});
-window.addEventListener('touchstart',e=>{
-  const now=Date.now();
-  if(now-lastTap<300){
-    menuVisible=!menuVisible;
-    menuBox.style.display=menuVisible?'flex':'none';
-    if(menuVisible)menuAngle=deviceYaw;
+(async function(){
+  // ======= configurable params =======
+  const EYE_ASPECT = 3/4; // width / height
+  const EYE_SCALE = 0.9;  // scaling factor for eye window relative to available space
+  const DESIRED_WIDTH = 1080; // try for high resolution (portrait)
+  const DESIRED_HEIGHT = Math.round(DESIRED_WIDTH / EYE_ASPECT); // keep 3:4
+  const USE_ENV_FACING = true; // try environment camera
+  // ===================================
+
+  const leftCanvas = document.getElementById('leftCanvas');
+  const rightCanvas = document.getElementById('rightCanvas');
+  const leftCtx = leftCanvas.getContext('2d', { willReadFrequently: false });
+  const rightCtx = rightCanvas.getContext('2d', { willReadFrequently: false });
+
+  const hud = document.getElementById('hud');
+  const hudContainer = document.getElementById('hudContainer');
+  const status = document.getElementById('status');
+  const touchLayer = document.getElementById('touchLayer');
+  const permissionOverlay = document.getElementById('permissionOverlay');
+  const reqMotionBtn = document.getElementById('reqMotion');
+
+  let stream = null;
+  let videoTrack = null;
+  let video = document.createElement('video');
+  video.playsInline = true;
+  video.muted = true;
+  video.autoplay = true;
+
+  // crosshair & HUD flags
+  let hudVisible = false;
+  let crosshairVisible = false;
+
+  // orientation state
+  let orientation = { alpha:0, beta:0, gamma:0 };
+  let lastOrientation = { alpha:0, beta:0, gamma:0 };
+
+  // double-tap detection
+  let lastTap = 0;
+  const DOUBLE_TAP_MS = 300;
+
+  // Request camera with high-res portrait constraints; browsers choose closest supported
+  async function startCamera() {
+    try {
+      const constraints = {
+        audio: false,
+        video: {
+          facingMode: USE_ENV_FACING ? { ideal: "environment" } : "user",
+          width: { ideal: DESIRED_WIDTH },
+          height: { ideal: DESIRED_HEIGHT },
+          // advanced: [{ focusMode: "continuous" }] // not widely supported
+        }
+      };
+      stream = await navigator.mediaDevices.getUserMedia(constraints);
+      video.srcObject = stream;
+      videoTrack = stream.getVideoTracks()[0];
+
+      await video.play();
+
+      // ensure canvases sizes match the video cropping we want.
+      // Determine capture frame size (videoWidth/Height)
+      const vw = video.videoWidth || DESIRED_WIDTH;
+      const vh = video.videoHeight || DESIRED_HEIGHT;
+
+      // We want each eye to display a region with aspect EYE_ASPECT.
+      // We'll set each canvas intrinsic pixel size to match the source region width/height as closely as possible
+      // but also scale to the visible eye element size via CSS.
+      resizeCanvases();
+      window.addEventListener('resize', resizeCanvases);
+
+      requestAnimationFrame(renderLoop);
+
+      status.textContent = 'Camera running — double-tap to toggle HUD';
+    } catch (err) {
+      console.error('Camera error', err);
+      status.textContent = 'Camera permission denied or not available.';
+      alert('Camera access is required. Check permissions and reload.');
+    }
   }
-  lastTap=now;
-});
-function ensureRotated(){
-  if(video.videoHeight<=video.videoWidth)return {src:video,w:video.videoWidth,h:video.videoHeight};
-  if(rotCanvas.width!==video.videoHeight||rotCanvas.height!==video.videoWidth){rotCanvas.width=video.videoHeight;rotCanvas.height=video.videoWidth;}
-  rotCtx.save();rotCtx.clearRect(0,0,rotCanvas.width,rotCanvas.height);rotCtx.translate(rotCanvas.width,0);rotCtx.rotate(Math.PI/2);rotCtx.drawImage(video,0,0,video.videoWidth,video.videoHeight);rotCtx.restore();
-  return {src:rotCanvas,w:rotCanvas.width,h:rotCanvas.height};
-}
-function drawCrosshair(ctx){
-  if(!menuVisible&&!alwaysShowCrosshair)return;
-  const cx=ctx.canvas.width/2,cy=ctx.canvas.height/2;
-  ctx.strokeStyle='white';ctx.lineWidth=2;ctx.beginPath();ctx.arc(cx,cy,8,0,2*Math.PI);ctx.stroke();
-}
-function drawLoop(){
-  const ctxL=leftCanvas.getContext('2d'),ctxR=rightCanvas.getContext('2d');
-  if(!video.videoWidth||!video.videoHeight){rafId=requestAnimationFrame(drawLoop);return;}
-  const {src,w,h}=ensureRotated();
-  [ctxL,ctxR].forEach(ctx=>{
-    ctx.clearRect(0,0,ctx.canvas.width,ctx.canvas.height);
-    const sw=w/zoom,sh=h/zoom;
-    const sx=(w-sw)/2,sy=(h-sh)/2;
-    ctx.drawImage(src,sx,sy,sw,sh,0,0,ctx.canvas.width,ctx.canvas.height);
-    drawCrosshair(ctx);
+
+  function resizeCanvases(){
+    // Eye element size in CSS pixels:
+    const leftEyeEl = document.getElementById('leftEye');
+    const rect = leftEyeEl.getBoundingClientRect();
+    // Determine desired canvas pixel dimensions (use devicePixelRatio for crispness)
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    // We'll set canvas width to rect.width * dpr, and height according to 1 / EYE_ASPECT
+    const cssW = rect.width;
+    const cssH = rect.height;
+    leftCanvas.style.width = cssW + 'px';
+    leftCanvas.style.height = cssH + 'px';
+    rightCanvas.style.width = cssW + 'px';
+    rightCanvas.style.height = cssH + 'px';
+    leftCanvas.width = Math.round(cssW * dpr);
+    leftCanvas.height = Math.round(cssH * dpr);
+    rightCanvas.width = Math.round(cssW * dpr);
+    rightCanvas.height = Math.round(cssH * dpr);
+
+    // set drawing scaling (so drawing operations use device pixels)
+    leftCtx.setTransform(dpr,0,0,dpr,0,0);
+    rightCtx.setTransform(dpr,0,0,dpr,0,0);
+  }
+
+  // Draw the video into both canvases. We'll crop to the portrait region (3:4) centered.
+  function renderLoop(){
+    if (video && video.readyState >= 2) {
+      // source dimensions
+      const svw = video.videoWidth;
+      const svh = video.videoHeight;
+
+      if (svw && svh) {
+        // compute the largest centered crop from source that matches desired eye aspect ratio
+        const desiredAspect = EYE_ASPECT; // width/height (3/4)
+        let srcW = svw, srcH = svh;
+        const srcAspect = svw / svh;
+
+        if (srcAspect > desiredAspect) {
+          // source is wider than desired -> crop width
+          srcH = svh;
+          srcW = Math.round(srcH * desiredAspect);
+        } else {
+          // source is taller -> crop height
+          srcW = svw;
+          srcH = Math.round(srcW / desiredAspect);
+        }
+        const sx = Math.round((svw - srcW) / 2);
+        const sy = Math.round((svh - srcH) / 2);
+
+        // For each eye: draw the cropped region into canvas, scaling to canvas display size.
+        // Note: the canvas CSS size might be smaller than the source. To reduce software scaling
+        // you can increase canvas pixel size (via devicePixelRatio), which we do above.
+        // If you want pixel-perfect 1:1, make canvas pixel size equal crop size; but that will occupy lots of memory.
+        drawFrameToCanvas(leftCtx, leftCanvas, video, sx, sy, srcW, srcH);
+        drawFrameToCanvas(rightCtx, rightCanvas, video, sx, sy, srcW, srcH);
+
+        // optionally draw HUD and crosshairs into canvases so they appear in both eyes
+        if (hudVisible) {
+          drawHUDIntoCanvas(leftCtx, leftCanvas);
+          drawHUDIntoCanvas(rightCtx, rightCanvas);
+        }
+        if (crosshairVisible) {
+          drawCrosshair(leftCtx, leftCanvas, /*eyeIndex*/0);
+          drawCrosshair(rightCtx, rightCanvas, /*eyeIndex*/1);
+        }
+      }
+    }
+    requestAnimationFrame(renderLoop);
+  }
+
+  function drawFrameToCanvas(ctx, canvasEl, vid, sx, sy, sw, sh){
+    // clear
+    const cw = canvasEl.width / (window.devicePixelRatio || 1);
+    const ch = canvasEl.height / (window.devicePixelRatio || 1);
+    ctx.clearRect(0,0,cw,ch);
+
+    // drawImage will scale the cropped source region to the full canvas drawable area
+    ctx.drawImage(vid, sx, sy, sw, sh, 0, 0, cw, ch);
+  }
+
+  // Draw a simple HUD onto the canvas (same visual as DOM hud but rendered for both eyes)
+  function drawHUDIntoCanvas(ctx, canvasEl){
+    const cw = canvasEl.width / (window.devicePixelRatio || 1);
+    const ch = canvasEl.height / (window.devicePixelRatio || 1);
+    // We'll draw a translucent rectangle near center-top
+    const hudW = cw * 0.6, hudH = ch * 0.12;
+    const x = (cw - hudW) / 2;
+    const y = ch * 0.18;
+    ctx.save();
+    ctx.globalAlpha = 0.85;
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    roundRect(ctx, x, y, hudW, hudH, 10, true, false);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#fff';
+    ctx.font = Math.max(12, hudH * 0.35) + 'px sans-serif';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('VR HUD — anchored in world', x + 12, y + hudH/2);
+    ctx.restore();
+  }
+
+  function drawCrosshair(ctx, canvasEl, eyeIndex){
+    const cw = canvasEl.width / (window.devicePixelRatio || 1);
+    const ch = canvasEl.height / (window.devicePixelRatio || 1);
+    // crosshair center slightly offset by small stereo offset to simulate IPD if desired
+    const ipdOffset = (eyeIndex === 0) ? -6 : 6; // pixels
+    const cx = cw / 2 + ipdOffset;
+    const cy = ch / 2;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,0.92)';
+    ctx.lineWidth = Math.max(1, cw * 0.004);
+    // small circle and lines
+    ctx.beginPath();
+    ctx.arc(cx, cy, Math.max(6, cw * 0.015), 0, Math.PI*2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(cx - 18, cy);
+    ctx.lineTo(cx + 18, cy);
+    ctx.moveTo(cx, cy - 18);
+    ctx.lineTo(cx, cy + 18);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function roundRect(ctx, x, y, w, h, r, fill, stroke) {
+    if (typeof r === 'undefined') r = 5;
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+    if (fill) ctx.fill();
+    if (stroke) ctx.stroke();
+  }
+
+  // ATTACH double-tap on touchLayer to toggle HUD
+  touchLayer.addEventListener('touchend', (ev) => {
+    const now = Date.now();
+    if (now - lastTap <= DOUBLE_TAP_MS) {
+      // double tap
+      hudVisible = !hudVisible;
+      toggleHUD(hudVisible);
+    }
+    lastTap = now;
   });
-  rafId=requestAnimationFrame(drawLoop);
-}
-drawLoop();
+
+  // Also allow double-click for desktop testing
+  touchLayer.addEventListener('dblclick', () => {
+    hudVisible = !hudVisible;
+    toggleHUD(hudVisible);
+  });
+
+  function toggleHUD(show){
+    hud.classList.toggle('hidden', !show);
+    if (!show) {
+      crosshairVisible = false;
+    }
+  }
+
+  // HUD button handlers
+  document.getElementById('toggleCross').addEventListener('click', () => {
+    crosshairVisible = !crosshairVisible;
+  });
+  document.getElementById('centerHUD').addEventListener('click', () => {
+    resetOrientationReference();
+  });
+
+  // Orientation handling: keep a "reference" orientation so HUD appears anchored.
+  let orientationRef = null;
+  function onDeviceOrientation(e){
+    // e.alpha (z), e.beta (x), e.gamma (y)
+    // Some browsers supply degrees; use them directly. We'll store and apply an inverse rotation to HUD.
+    if (e.absolute === null && e.alpha === null) return;
+    orientation.alpha = e.alpha || 0;
+    orientation.beta = e.beta || 0;
+    orientation.gamma = e.gamma || 0;
+
+    // If no reference, set one when HUD is first toggled
+    if (!orientationRef && hudVisible) {
+      orientationRef = { ...orientation };
+      status.textContent = 'HUD anchored';
+    }
+
+    // If HUD is visible and we have a reference, compute relative rotation and apply inverse to HUD DOM element
+    if (hudVisible && orientationRef) {
+      const rel = {
+        alpha: shortestAngle(orientation.alpha - orientationRef.alpha),
+        beta: orientation.beta - orientationRef.beta,
+        gamma: orientation.gamma - orientationRef.gamma
+      };
+      // Apply inverse rotation so HUD stays put relative to world
+      // Note: ordering and sign may need to be tweaked for different phones; this is a practical approximation.
+      const rx = -rel.beta;   // pitch
+      const ry = rel.gamma;   // roll -> map to yaw visually
+      const rz = -rel.alpha;  // yaw
+      // apply transform
+      hud.style.transform = `translate(-50%, -50%) rotateX(${rx}deg) rotateY(${ry}deg) rotateZ(${rz}deg)`;
+      // Also apply inverse to canvas drawings (not necessary because we draw crosshairs centered)
+      // If you prefer to shift crosshair slightly with rotation, do that here.
+    }
+  }
+
+  function resetOrientationReference(){
+    orientationRef = { ...orientation };
+    status.textContent = 'HUD re-centered';
+    setTimeout(()=> status.textContent = 'Double-tap to toggle HUD', 1200);
+  }
+
+  function shortestAngle(a){
+    // normalize to [-180,180]
+    a = ((a + 180) % 360) - 180;
+    return a;
+  }
+
+  // Request permission for motion on iOS 13+ if needed
+  async function ensureMotionPermissionIfNeeded(){
+    if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+      // iOS
+      permissionOverlay.style.display = 'flex';
+      reqMotionBtn.onclick = async () => {
+        try {
+          const res = await DeviceMotionEvent.requestPermission();
+          permissionOverlay.style.display = 'none';
+          if (res === 'granted') {
+            window.addEventListener('deviceorientation', onDeviceOrientation);
+          } else {
+            alert('Motion permission not granted — HUD will not be rotation-stable on this device.');
+          }
+        } catch (err) {
+          permissionOverlay.style.display = 'none';
+          console.warn('Device motion permission request failed', err);
+          alert('Could not request motion permission. HUD may not be rotation-stable.');
+        }
+      };
+    } else {
+      // Non-iOS: just add listener
+      window.addEventListener('deviceorientation', onDeviceOrientation);
+    }
+  }
+
+  // Request camera start and motion permission
+  await ensureMotionPermissionIfNeeded();
+  await startCamera();
+
+  // Center on initial showing of HUD
+  resetOrientationReference();
+
+  // helper: stop stream on unload
+  window.addEventListener('unload', ()=> {
+    if (stream) {
+      stream.getTracks().forEach(t => t.stop());
+    }
+  });
+
+  // Utility to show debugging info (optional)
+  // window.addEventListener('deviceorientation', (e)=>{ console.log(e); });
+
+})();
 </script>
 </body>
 </html>
