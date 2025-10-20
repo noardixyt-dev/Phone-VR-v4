@@ -124,8 +124,9 @@ let menuPitch = 0;
 let menuSpawned = false;
 
 let menuPos = {xL:0, yL:0, xR:0, yR:0};
-const offsetMultiplier = 1.5;
-const smoothing = 0.25;
+const yawMultiplier = 1.0;       // horizontal movement scaling
+const pitchMultiplier = 1.5;     // vertical movement scaling, like YouTube VR
+const smoothing = 0.25;           // responsiveness
 
 const baseGap = 20;
 const defaultWidth = 45;
@@ -222,10 +223,10 @@ function updateMenuPosition() {
   const lRect = leftContainer.getBoundingClientRect();
   const rRect = rightContainer.getBoundingClientRect();
 
-  const targetXL = (lRect.width/2) + (deltaYaw/(fov/2))*(lRect.width/2) - menuLeft.offsetWidth/2;
-  const targetYL = (lRect.height/2) + (deltaPitch/(vFov/2))*(lRect.height/2) - menuLeft.offsetHeight/2;
-  const targetXR = (rRect.width/2) + (deltaYaw/(fov/2))*(rRect.width/2) - menuRight.offsetWidth/2;
-  const targetYR = (rRect.height/2) + (deltaPitch/(vFov/2))*(rRect.height/2) - menuRight.offsetHeight/2;
+  const targetXL = (lRect.width/2) + (deltaYaw/(fov/2))* (lRect.width/2) * yawMultiplier - menuLeft.offsetWidth/2;
+  const targetYL = (lRect.height/2) + (deltaPitch/(vFov/2)) * (lRect.height/2) * pitchMultiplier - menuLeft.offsetHeight/2;
+  const targetXR = (rRect.width/2) + (deltaYaw/(fov/2)) * (rRect.width/2) * yawMultiplier - menuRight.offsetWidth/2;
+  const targetYR = (rRect.height/2) + (deltaPitch/(vFov/2)) * (rRect.height/2) * pitchMultiplier - menuRight.offsetHeight/2;
 
   menuPos.xL = lerp(menuPos.xL, targetXL, smoothing);
   menuPos.yL = lerp(menuPos.yL, targetYL, smoothing);
