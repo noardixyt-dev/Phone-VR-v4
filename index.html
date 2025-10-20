@@ -28,18 +28,18 @@
 
   .eye-container {
     position: relative;
-    width: 33%;          /* slightly smaller for proper FOV */
-    aspect-ratio: 1/1;   /* square */
-    margin: 0 5px;       /* small gap between eyes */
-    background: #000;
+    width: 28%;        /* smaller square for better FOV */
+    aspect-ratio: 1/1;
+    margin: 0 5px;     /* gap between eyes */
     overflow: hidden;
+    background: #000;
     border: 1px solid #222;
   }
 
   .eye-container video {
     width: 100%;
     height: 100%;
-    object-fit: contain;  /* show full camera feed */
+    object-fit: cover;  /* zoom video to fill square, crop sides */
   }
 
   .menu {
@@ -119,7 +119,7 @@ async function startCamera() {
     const stream = await navigator.mediaDevices.getUserMedia({
       video: {
         width: { ideal: 3840 },
-        height: { ideal: 3840 },
+        height: { ideal: 2160 },
         facingMode: 'environment'
       },
       audio: false
@@ -181,9 +181,12 @@ function updateMenuPosition() {
   const fov = 100;  // horizontal FOV
   const vFov = 80;  // vertical FOV
 
-  // Correct world-locked offsets
-  let yawOffset = ((menuYaw - currentYaw + 540) % 360) - 180;  // menu stays fixed in world
-  let pitchOffset = menuPitch - currentPitch;                   // looking up moves menu down, etc.
+  // World-locked offsets
+  let yawOffset = ((menuYaw - currentYaw + 540) % 360) - 180;
+  yawOffset = -yawOffset; // invert so menu stays fixed
+
+  let pitchOffset = menuPitch - currentPitch;
+  pitchOffset = -pitchOffset; // invert so menu stays fixed
 
   const visible = Math.abs(yawOffset) <= fov/2 && Math.abs(pitchOffset) <= vFov/2;
 
