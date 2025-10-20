@@ -5,84 +5,83 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>Phone VR Camera Viewer</title>
 <style>
-  html, body {
-    margin: 0;
-    padding: 0;
-    overflow: hidden;
-    height: 100%;
-    width: 100%;
-    background: #000;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    touch-action: none;
-  }
+html, body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  height: 100%;
+  width: 100%;
+  background: #000;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  touch-action: none;
+}
 
-  #vr-container {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    width: 100%;
-    height: 100%;
-  }
+#vr-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+}
 
-  .eye-container {
-    position: relative;
-    width: 45%;        /* default width */
-    aspect-ratio: 1/1;
-    margin: 0 5px;     /* will be updated dynamically */
-    overflow: hidden;
-    background: #000;
-    border: 1px solid #222;
-  }
+.eye-container {
+  position: relative;
+  width: 45%;
+  aspect-ratio: 1/1;
+  margin: 0 5px;
+  overflow: hidden;
+  background: #000;
+  border: 1px solid #222;
+}
 
-  .eye-container video {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
+.eye-container video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
 
-  .menu {
+.menu {
+  position: absolute;
+  width: 180px;
+  height: 100px;
+  background: rgba(255,255,255,0.9);
+  border-radius: 12px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-size: 18px;
+  color: #000;
+  pointer-events: none;
+  visibility: visible;
+}
+
+#fullscreen-btn, #scale-slider {
+  position: absolute;
+  padding: 10px 16px;
+  background: rgba(255,255,255,0.9);
+  border-radius: 8px;
+  font-size: 16px;
+  z-index: 1000;
+}
+
+#fullscreen-btn { top: 20px; right: 20px; }
+#scale-slider { top: 20px; left: 20px; width: 150px; }
+
+@media screen and (orientation: portrait) {
+  body::before {
+    content: "Please rotate your device to landscape";
+    color: white;
+    font-size: 2em;
     position: absolute;
-    width: 180px;
-    height: 100px;
-    background: rgba(255,255,255,0.9);
-    border-radius: 12px;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    font-size: 18px;
-    color: #000;
-    pointer-events: none;
-    visibility: visible;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
   }
-
-  #fullscreen-btn, #scale-slider {
-    position: absolute;
-    top: 20px;
-    padding: 10px 16px;
-    background: rgba(255,255,255,0.9);
-    border-radius: 8px;
-    font-size: 16px;
-    z-index: 1000;
-  }
-
-  #fullscreen-btn { right: 80px; }
-  #scale-slider { right: 20px; width: 150px; }
-
-  @media screen and (orientation: portrait) {
-    body::before {
-      content: "Please rotate your device to landscape";
-      color: white;
-      font-size: 2em;
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      text-align: center;
-    }
-    #vr-container { display: none; }
-  }
+  #vr-container { display: none; }
+}
 </style>
 </head>
 <body>
@@ -119,7 +118,7 @@ let menuSpawned = false;
 
 let menuPos = {xL:0, yL:0, xR:0, yR:0};
 const offsetMultiplier = 1.5;
-const smoothing = 0.1;
+const smoothing = 0.25; // faster than before
 
 const baseGap = 10;
 const defaultWidth = 45;
@@ -191,16 +190,18 @@ function spawnMenu(){
   menuPitch = currentPitch;
 }
 
-// Lerp helper for smoothing
+// Lerp helper
 function lerp(a, b, t){ return a + (b - a) * t; }
 
 function updateMenuPosition() {
   const fov = 100;
   const vFov = 80;
 
-  // Fully tracked: menu moves opposite to head motion
+  // fully tracked menu: opposite to head motion
   const yawOffset = -(((menuYaw - currentYaw + 540) % 360) - 180) * offsetMultiplier;
-  const pitchOffset = -((menuPitch - currentPitch) * offsetMultiplier);
+
+  // Correct vertical tracking using beta relative to spawn
+  const pitchOffset = -(menuPitch - currentPitch) * offsetMultiplier;
 
   const lRect = leftContainer.getBoundingClientRect();
   const rRect = rightContainer.getBoundingClientRect();
@@ -210,7 +211,6 @@ function updateMenuPosition() {
   const targetXR = (rRect.width/2) + (yawOffset/(fov/2))*(rRect.width/2) - menuRight.offsetWidth/2;
   const targetYR = (rRect.height/2) + (pitchOffset/(vFov/2))*(rRect.height/2) - menuRight.offsetHeight/2;
 
-  // Smooth movement
   menuPos.xL = lerp(menuPos.xL, targetXL, smoothing);
   menuPos.yL = lerp(menuPos.yL, targetYL, smoothing);
   menuPos.xR = lerp(menuPos.xR, targetXR, smoothing);
