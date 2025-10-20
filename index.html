@@ -56,7 +56,7 @@ html, body {
 }
 #fullscreen-btn, #fov-slider {
   position: absolute;
-  padding: 8px 12px;
+  padding: 6px 10px;
   background: rgba(255,255,255,0.9);
   border-radius: 8px;
   font-size: 14px;
@@ -101,7 +101,6 @@ const leftEye = document.getElementById('left-eye');
 const rightEye = document.getElementById('right-eye');
 const leftContainer = document.getElementById('left-eye-container');
 const rightContainer = document.getElementById('right-eye-container');
-const vrContainer = document.getElementById('vr-container');
 const menuLeft = document.getElementById('menu-left');
 const menuRight = document.getElementById('menu-right');
 const fullscreenBtn = document.getElementById('fullscreen-btn');
@@ -111,9 +110,9 @@ let currentYaw = 0, currentPitch = 0;
 let menuSpawned = false;
 let menuWorldYaw = 0, menuWorldPitch = 0;
 let menuPos = {xL:0, yL:0, xR:0, yR:0};
-const smoothing = 0.22;
-const horizontalSensitivity = 2.05; 
-const verticalSensitivity = 1.8; 
+const smoothing = 0.25;
+const horizontalSensitivity = 2.2; 
+const verticalSensitivity = 1.5; 
 const baseGap = 20;
 const defaultWidth = 45;
 
@@ -153,14 +152,25 @@ fovSlider.addEventListener('input', updateEyeScaleAndGap);
 
 // Device orientation
 window.addEventListener('deviceorientation', e=>{
-  if(e.alpha!==null && e.beta!==null){
-    currentYaw = e.alpha;
-    currentPitch = e.beta;
+  if(e.alpha!==null && e.beta!==null && e.gamma!==null){
+    // Convert to radians
+    const alpha = e.alpha * Math.PI/180;
+    const beta = e.beta * Math.PI/180;
+    const gamma = e.gamma * Math.PI/180;
+
+    // Compute yaw/pitch ignoring roll
+    const cA = Math.cos(alpha), sA = Math.sin(alpha);
+    const cB = Math.cos(beta), sB = Math.sin(beta);
+
+    // Approximate horizon-locked pitch and yaw
+    currentYaw = alpha * 180/Math.PI;  
+    currentPitch = beta * 180/Math.PI;
+
     if(menuSpawned) updateMenuPosition();
   }
 });
 
-// Double tap to toggle menu, triple-tap reserved for relocation
+// Double tap to toggle menu
 let lastTap = 0;
 let tapCount = 0;
 window.addEventListener('touchend', e=>{
@@ -186,7 +196,7 @@ function toggleMenu(){
 // Lerp helper
 function lerp(a,b,t){ return a+(b-a)*t; }
 
-// Convert world yaw/pitch to screen coordinates
+// Map world yaw/pitch to screen coordinates
 function worldToScreen(menuYaw, menuPitch, rect){
   let deltaYaw = ((menuYaw - currentYaw + 540) % 360) - 180;
   let deltaPitch = menuPitch - currentPitch;
@@ -195,7 +205,6 @@ function worldToScreen(menuYaw, menuPitch, rect){
   return {x,y};
 }
 
-// Update menu position
 function updateMenuPosition(){
   const lRect = leftContainer.getBoundingClientRect();
   const rRect = rightContainer.getBoundingClientRect();
@@ -210,6 +219,17 @@ function updateMenuPosition(){
   menuRight.style.left = menuPos.xR + "px";
   menuRight.style.top = menuPos.yR + "px";
 }
+
+// Placeholder for future AR/WebXR 3D model support
+async function startARSession() {
+  if(!navigator.xr) return;
+  try{
+    const session = await navigator.xr.requestSession('immersive-ar', {requiredFeatures:['local-floor']});
+    const refSpace = await session.requestReferenceSpace('local-floor');
+    // Can add 3D model rendering here in the future
+  } catch(err){ console.log("AR not supported or denied:", err); }
+}
+// startARSession(); // uncomment when using WebXR AR
 </script>
 </body>
 </html>
