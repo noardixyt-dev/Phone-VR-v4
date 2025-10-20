@@ -1,91 +1,48 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Phone VR Camera Viewer</title>
-<style>
-html, body {
-  margin: 0;
-  padding: 0;
-  overflow: hidden;
-  height: 100%;
-  width: 100%;
-  background: #000;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  touch-action: none;
-}
-
-#vr-container {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  width: 100%;
-  height: 100%;
-}
-
-.eye-container {
-  position: relative;
-  width: 45%;
-  aspect-ratio: 1/1;
-  margin: 0 20px;
-  overflow: hidden;
-  background: #000;
-  border-radius: 16px;
-}
-
-.eye-container video {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  border-radius: 16px;
-}
-
-.menu {
-  position: absolute;
-  width: 180px;
-  height: 100px;
-  background: rgba(255,255,255,0.9);
-  border-radius: 12px;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  font-size: 18px;
-  color: #000;
-  pointer-events: none;
-  visibility: hidden;
-}
-
-#fullscreen-btn, #fov-slider, #xaxis-slider, #xaxis-label {
-  position: absolute;
-  padding: 10px 16px;
-  background: rgba(255,255,255,0.9);
-  border-radius: 8px;
-  font-size: 16px;
-  z-index: 1000;
-}
-
-#fullscreen-btn { top: 20px; right: 20px; }
-#fov-slider { top: 20px; left: 20px; width: 150px; }
-#xaxis-label { top: 60px; left: 20px; color: black; font-size: 14px; font-weight: bold; }
-#xaxis-slider { top: 80px; left: 20px; width: 150px; }
-
-@media screen and (orientation: portrait) {
-  body::before {
-    content: "Please rotate your device to landscape";
-    color: white;
-    font-size: 2em;
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    text-align: center;
-  }
-  #vr-container { display: none; }
-}
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VR Menu with WebXR</title>
+  <style>
+    body, html {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      height: 100%;
+      background: #000;
+    }
+    #vr-container {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    .eye-container {
+      position: absolute;
+      width: 45%;
+      height: 100%;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    .menu {
+      position: absolute;
+      width: 200px;
+      height: 100px;
+      background: rgba(255, 255, 255, 0.9);
+      border-radius: 12px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font-size: 18px;
+      color: #000;
+      pointer-events: none;
+      visibility: hidden;
+    }
+  </style>
 </head>
 <body>
 
@@ -100,128 +57,154 @@ html, body {
   </div>
 </div>
 
-<button id="fullscreen-btn">Fullscreen</button>
-<input type="range" id="fov-slider" min="20" max="50" value="45">
-<label id="xaxis-label">X-Axis Movement</label>
-<input type="range" id="xaxis-slider" min="-50" max="50" value="0">
-
 <script>
-const leftEye = document.getElementById('left-eye');
-const rightEye = document.getElementById('right-eye');
-const leftContainer = document.getElementById('left-eye-container');
-const rightContainer = document.getElementById('right-eye-container');
-const vrContainer = document.getElementById('vr-container');
-const menuLeft = document.getElementById('menu-left');
-const menuRight = document.getElementById('menu-right');
-const fullscreenBtn = document.getElementById('fullscreen-btn');
-const fovSlider = document.getElementById('fov-slider');
-const xaxisSlider = document.getElementById('xaxis-slider');
+  const leftEye = document.getElementById('left-eye');
+  const rightEye = document.getElementById('right-eye');
+  const leftContainer = document.getElementById('left-eye-container');
+  const rightContainer = document.getElementById('right-eye-container');
+  const menuLeft = document.getElementById('menu-left');
+  const menuRight = document.getElementById('menu-right');
 
-let currentYaw = 0, currentPitch = 0;
-let menuSpawned = false;
-let menuWorldYaw = 0, menuWorldPitch = 0;
-let menuPos = {xL:0, yL:0, xR:0, yR:0};
-const smoothing = 0.22;
-const horizontalSensitivity = 2.05; // adjust for YouTube VR feel
-const baseGap = 20;
-const defaultWidth = 45;
-let xOffset = 0;
+  let currentYaw = 0, currentPitch = 0;
+  let menuSpawned = false;
+  let menuWorldYaw = 0, menuWorldPitch = 0;
+  let menuPos = {xL: 0, yL: 0, xR: 0, yR: 0};
+  const smoothing = 0.22;
+  const horizontalSensitivity = 2.05;
 
-// Start camera
-async function startCamera() {
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { width:{ideal:3840}, height:{ideal:2160}, facingMode:'environment' },
-      audio: false
-    });
-    leftEye.srcObject = stream;
-    rightEye.srcObject = stream;
-    leftEye.onloadedmetadata = rightEye.onloadedmetadata = ()=>{ leftEye.play(); rightEye.play(); };
-  } catch(err){ alert("Camera access denied."); console.error(err);}
-}
-startCamera();
+  // Initialize WebXR
+  async function initXR() {
+    if (!navigator.xr) {
+      alert("WebXR is not supported by your browser.");
+      return;
+    }
 
-// Fullscreen
-fullscreenBtn.addEventListener('click', () => {
-  if(document.fullscreenElement) document.exitFullscreen();
-  else document.documentElement.requestFullscreen();
-});
+    try {
+      const session = await navigator.xr.requestSession('immersive-vr');
+      session.addEventListener('end', () => {
+        alert("VR session ended.");
+      });
 
-// Eye scaling and gap
-function updateEyeScaleAndGap() {
-  const scale = fovSlider.value + '%';
-  leftContainer.style.width = scale;
-  rightContainer.style.width = scale;
-  const dynamicGap = baseGap * (fovSlider.value / defaultWidth);
-  leftContainer.style.marginLeft = dynamicGap/2 + "px";
-  leftContainer.style.marginRight = dynamicGap/2 + "px";
-  rightContainer.style.marginLeft = dynamicGap/2 + "px";
-  rightContainer.style.marginRight = dynamicGap/2 + "px";
-  vrContainer.style.transform = `translateX(${xOffset}px)`;
-}
-updateEyeScaleAndGap();
-fovSlider.addEventListener('input', updateEyeScaleAndGap);
-xaxisSlider.addEventListener('input', () => { xOffset = xaxisSlider.value + "px"; updateEyeScaleAndGap(); });
+      const referenceSpace = await session.requestReferenceSpace('local');
+      const viewerPose = await session.requestViewerPose(referenceSpace);
 
-// Device orientation
-window.addEventListener('deviceorientation', e=>{
-  if(e.alpha!==null && e.beta!==null){
-    currentYaw = e.alpha;
-    currentPitch = e.beta;
-    if(menuSpawned) updateMenuPosition();
+      // Handle head tracking and menu positioning here
+      session.requestAnimationFrame((time, frame) => {
+        const pose = frame.getViewerPose(referenceSpace);
+        if (pose) {
+          const orientation = pose.transform.orientation;
+          currentYaw = Math.atan2(2 * (orientation.w * orientation.z + orientation.x * orientation.y), 1 - 2 * (orientation.y * orientation.y + orientation.z * orientation.z));
+          currentPitch = Math.asin(2 * (orientation.w * orientation.y - orientation.z * orientation.x));
+
+          if (menuSpawned) {
+            updateMenuPosition();
+          }
+        }
+        session.requestAnimationFrame(arguments.callee);
+      });
+    } catch (err) {
+      console.error("Failed to start XR session:", err);
+    }
   }
-});
 
-// Double tap to spawn menu
-let lastTap = 0;
-window.addEventListener('touchend', e=>{
-  const now = new Date().getTime();
-  if(now - lastTap < 300 && now - lastTap > 0){ spawnMenu(); e.preventDefault(); e.stopPropagation();}
-  lastTap = now;
-});
+  // Start camera
+  async function startCamera() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment' },
+        audio: false
+      });
+      leftEye.srcObject = stream;
+      rightEye.srcObject = stream;
+      leftEye.onloadedmetadata = rightEye.onloadedmetadata = () => {
+        leftEye.play();
+        rightEye.play();
+      };
+    } catch (err) {
+      alert("Camera access denied.");
+      console.error(err);
+    }
+  }
+  startCamera();
 
-function spawnMenu(){
-  menuSpawned = true;
-  menuWorldYaw = currentYaw;
-  menuWorldPitch = currentPitch;
-}
+  // Fullscreen
+  document.getElementById('fullscreen-btn').addEventListener('click', () => {
+    if (document.fullscreenElement) {
+      document.exitFullscreen();
+    } else {
+      document.documentElement.requestFullscreen();
+    }
+  });
 
-// Lerp helper
-function lerp(a,b,t){ return a+(b-a)*t; }
+  // Device orientation
+  window.addEventListener('deviceorientation', e => {
+    if (e.alpha !== null && e.beta !== null) {
+      currentYaw = e.alpha;
+      currentPitch = e.beta;
+      if (menuSpawned) {
+        updateMenuPosition();
+      }
+    }
+  });
 
-// Convert world yaw/pitch to screen coordinates
-function worldToScreen(menuYaw, menuPitch, rect) {
-  const fovH = 100; // horizontal FOV
-  let deltaYaw = menuYaw - currentYaw;
-  deltaYaw = ((deltaYaw + 540) % 360) - 180; // normalize
-  const x = rect.width/2 - (deltaYaw / (fovH/2)) * (rect.width/2) * horizontalSensitivity - 90;
-  const y = rect.height/2 - 50; // vertical center
-  return {x,y};
-}
+  // Double tap to spawn menu
+  let lastTap = 0;
+  window.addEventListener('touchend', e => {
+    const now = new Date().getTime();
+    if (now - lastTap < 300 && now - lastTap > 0) {
+      spawnMenu();
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    lastTap = now;
+  });
 
-// Update menu position (world-locked, yaw-only)
-function updateMenuPosition(){
-  const lRect = leftContainer.getBoundingClientRect();
-  const rRect = rightContainer.getBoundingClientRect();
+  function spawnMenu() {
+    menuSpawned = true;
+    menuWorldYaw = currentYaw;
+    menuWorldPitch = currentPitch;
+  }
 
-  const targetL = worldToScreen(menuWorldYaw, menuWorldPitch, lRect);
-  const targetR = worldToScreen(menuWorldYaw, menuWorldPitch, rRect);
+  // Lerp helper
+  function lerp(a, b, t) {
+    return a + (b - a) * t;
+  }
 
-  // smooth
-  menuPos.xL = lerp(menuPos.xL, targetL.x, smoothing);
-  menuPos.yL = lerp(menuPos.yL, targetL.y, smoothing);
-  menuPos.xR = lerp(menuPos.xR, targetR.x, smoothing);
-  menuPos.yR = lerp(menuPos.yR, targetR.y, smoothing);
+  // Convert world yaw/pitch to screen coordinates
+  function worldToScreen(menuYaw, menuPitch, rect) {
+    const fovH = 100;
+    let deltaYaw = menuYaw - currentYaw;
+    deltaYaw = ((deltaYaw + 540) % 360) - 180;
+    const x = rect.width / 2 - (deltaYaw / (fovH / 2)) * (rect.width / 2) * horizontalSensitivity - 90;
+    const y = rect.height / 2 - 50;
+    return { x, y };
+  }
 
-  // apply
-  menuLeft.style.left = menuPos.xL + "px";
-  menuLeft.style.top = menuPos.yL + "px";
-  menuRight.style.left = menuPos.xR + "px";
-  menuRight.style.top = menuPos.yR + "px";
+  // Update menu position
+  function updateMenuPosition() {
+    const lRect = leftContainer.getBoundingClientRect();
+    const rRect = rightContainer.getBoundingClientRect();
 
-  menuLeft.style.visibility = "visible";
-  menuRight.style.visibility = "visible";
-}
+    const targetL = worldToScreen(menuWorldYaw, menuWorldPitch, lRect);
+    const targetR = worldToScreen(menuWorldYaw, menuWorldPitch, rRect);
+
+    menuPos.xL = lerp(menuPos.xL, targetL.x, smoothing);
+    menuPos.yL = lerp(menuPos.yL, targetL.y, smoothing);
+    menuPos.xR = lerp(menuPos.xR, targetR.x, smoothing);
+    menuPos.yR = lerp(menuPos.yR, targetR.y, smoothing);
+
+    menuLeft.style.left = menuPos.xL + "px";
+    menuLeft.style.top = menuPos.yL + "px";
+    menuRight.style.left = menuPos.xR + "px";
+    menuRight.style.top = menuPos.yR + "px";
+
+    menuLeft.style.visibility = "visible";
+    menuRight.style.visibility = "visible";
+  }
+
+  // Initialize XR
+  initXR();
 </script>
+
 </body>
 </html>
