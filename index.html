@@ -30,18 +30,18 @@ html, body {
   position: relative;
   width: 45%;
   aspect-ratio: 1/1;
-  margin: 0 10px; /* initial gap, will be updated dynamically */
+  margin: 0 10px;
   overflow: hidden;
   background: #000;
   border: 1px solid #222;
-  border-radius: 16px; /* rounded corners */
+  border-radius: 16px;
 }
 
 .eye-container video {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  border-radius: 16px; /* rounded video inside container */
+  border-radius: 16px;
 }
 
 .menu {
@@ -59,7 +59,7 @@ html, body {
   visibility: visible;
 }
 
-#fullscreen-btn, #scale-slider {
+#fullscreen-btn, #fov-slider, #xaxis-slider, #xaxis-label {
   position: absolute;
   padding: 10px 16px;
   background: rgba(255,255,255,0.9);
@@ -69,7 +69,9 @@ html, body {
 }
 
 #fullscreen-btn { top: 20px; right: 20px; }
-#scale-slider { top: 20px; left: 20px; width: 150px; }
+#fov-slider { top: 20px; left: 20px; width: 150px; }
+#xaxis-label { top: 60px; left: 20px; color: black; font-size: 14px; font-weight: bold; }
+#xaxis-slider { top: 80px; left: 20px; width: 150px; }
 
 @media screen and (orientation: portrait) {
   body::before {
@@ -100,7 +102,9 @@ html, body {
 </div>
 
 <button id="fullscreen-btn">Fullscreen</button>
-<input type="range" id="scale-slider" min="20" max="50" value="45">
+<input type="range" id="fov-slider" min="20" max="50" value="45">
+<label id="xaxis-label">X-Axis Movement</label>
+<input type="range" id="xaxis-slider" min="-20" max="20" value="0">
 
 <script>
 const leftEye = document.getElementById('left-eye');
@@ -110,7 +114,8 @@ const rightContainer = document.getElementById('right-eye-container');
 const menuLeft = document.getElementById('menu-left');
 const menuRight = document.getElementById('menu-right');
 const fullscreenBtn = document.getElementById('fullscreen-btn');
-const scaleSlider = document.getElementById('scale-slider');
+const fovSlider = document.getElementById('fov-slider');
+const xaxisSlider = document.getElementById('xaxis-slider');
 
 let currentYaw = 0;
 let currentPitch = 0;
@@ -122,8 +127,11 @@ let menuPos = {xL:0, yL:0, xR:0, yR:0};
 const offsetMultiplier = 1.5;
 const smoothing = 0.25;
 
-const baseGap = 20; // updated gap
+const baseGap = 20;
 const defaultWidth = 45;
+
+// X-axis movement
+let xOffset = 0;
 
 // Start camera automatically
 async function startCamera() {
@@ -152,18 +160,26 @@ fullscreenBtn.addEventListener('click', () => {
 
 // Eye scale slider with dynamic gap
 function updateEyeScaleAndGap() {
-  const scale = scaleSlider.value + '%';
+  const scale = fovSlider.value + '%';
   leftContainer.style.width = scale;
   rightContainer.style.width = scale;
 
-  const dynamicGap = baseGap * (scaleSlider.value / defaultWidth);
+  const dynamicGap = baseGap * (fovSlider.value / defaultWidth);
   leftContainer.style.marginLeft = dynamicGap/2 + "px";
   leftContainer.style.marginRight = dynamicGap/2 + "px";
   rightContainer.style.marginLeft = dynamicGap/2 + "px";
   rightContainer.style.marginRight = dynamicGap/2 + "px";
+
+  // Apply X-axis offset
+  leftContainer.style.transform = `translateX(${xOffset}px)`;
+  rightContainer.style.transform = `translateX(${xOffset}px)`;
 }
 updateEyeScaleAndGap();
-scaleSlider.addEventListener('input', updateEyeScaleAndGap);
+fovSlider.addEventListener('input', updateEyeScaleAndGap);
+xaxisSlider.addEventListener('input', () => {
+  xOffset = xaxisSlider.value + "px";
+  updateEyeScaleAndGap();
+});
 
 // Device orientation
 window.addEventListener('deviceorientation', (event) => {
@@ -195,20 +211,21 @@ function spawnMenu(){
 // Lerp helper
 function lerp(a, b, t){ return a + (b - a) * t; }
 
+// Menu projection relative to spawn yaw/pitch (world-locked)
 function updateMenuPosition() {
   const fov = 100;
   const vFov = 80;
 
-  const yawOffset = -(((menuYaw - currentYaw + 540) % 360) - 180) * offsetMultiplier;
-  const pitchOffset = -(menuPitch - currentPitch) * offsetMultiplier;
+  const deltaYaw = ((menuYaw - currentYaw + 540) % 360) - 180;
+  const deltaPitch = menuPitch - currentPitch;
 
   const lRect = leftContainer.getBoundingClientRect();
   const rRect = rightContainer.getBoundingClientRect();
 
-  const targetXL = (lRect.width/2) + (yawOffset/(fov/2))*(lRect.width/2) - menuLeft.offsetWidth/2;
-  const targetYL = (lRect.height/2) + (pitchOffset/(vFov/2))*(lRect.height/2) - menuLeft.offsetHeight/2;
-  const targetXR = (rRect.width/2) + (yawOffset/(fov/2))*(rRect.width/2) - menuRight.offsetWidth/2;
-  const targetYR = (rRect.height/2) + (pitchOffset/(vFov/2))*(rRect.height/2) - menuRight.offsetHeight/2;
+  const targetXL = (lRect.width/2) + (deltaYaw/(fov/2))*(lRect.width/2) - menuLeft.offsetWidth/2;
+  const targetYL = (lRect.height/2) + (deltaPitch/(vFov/2))*(lRect.height/2) - menuLeft.offsetHeight/2;
+  const targetXR = (rRect.width/2) + (deltaYaw/(fov/2))*(rRect.width/2) - menuRight.offsetWidth/2;
+  const targetYR = (rRect.height/2) + (deltaPitch/(vFov/2))*(rRect.height/2) - menuRight.offsetHeight/2;
 
   menuPos.xL = lerp(menuPos.xL, targetXL, smoothing);
   menuPos.yL = lerp(menuPos.yL, targetYL, smoothing);
