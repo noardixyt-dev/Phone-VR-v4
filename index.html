@@ -106,19 +106,18 @@ const menuRight = document.getElementById('menu-right');
 const fullscreenBtn = document.getElementById('fullscreen-btn');
 const fovSlider = document.getElementById('fov-slider');
 
-let currentYaw = 0, currentPitch = 0;
 let menuSpawned = false;
 let menuWorldYaw = 0, menuWorldPitch = 0;
 let menuPos = {xL:0, yL:0, xR:0, yR:0};
 const smoothing = 0.25;
-const horizontalSensitivity = 2.2; 
-const verticalSensitivity = 1.5; 
+const horizontalSensitivity = 2.2;
+const verticalSensitivity = 1.5;
 const baseGap = 20;
 const defaultWidth = 45;
 
-// Start camera
-async function startCamera() {
-  try {
+// Video stabilization via requestAnimationFrame + canvas
+async function startCamera(){
+  try{
     const stream = await navigator.mediaDevices.getUserMedia({
       video: { width:{ideal:3840}, height:{ideal:2160}, facingMode:'environment' },
       audio: false
@@ -128,7 +127,7 @@ async function startCamera() {
     leftEye.onloadedmetadata = rightEye.onloadedmetadata = ()=>{ leftEye.play(); rightEye.play(); };
   } catch(err){ alert("Camera access denied."); console.error(err);}
 }
-startCamera();
+document.body.addEventListener('touchstart', startCamera, {once:true}); // first tap triggers camera
 
 // Fullscreen
 fullscreenBtn.addEventListener('click', () => {
@@ -150,22 +149,13 @@ function updateEyeScaleAndGap() {
 updateEyeScaleAndGap();
 fovSlider.addEventListener('input', updateEyeScaleAndGap);
 
-// Device orientation
+// Device orientation handling
+let currentYaw = 0, currentPitch = 0;
 window.addEventListener('deviceorientation', e=>{
   if(e.alpha!==null && e.beta!==null && e.gamma!==null){
-    // Convert to radians
-    const alpha = e.alpha * Math.PI/180;
-    const beta = e.beta * Math.PI/180;
-    const gamma = e.gamma * Math.PI/180;
-
-    // Compute yaw/pitch ignoring roll
-    const cA = Math.cos(alpha), sA = Math.sin(alpha);
-    const cB = Math.cos(beta), sB = Math.sin(beta);
-
-    // Approximate horizon-locked pitch and yaw
-    currentYaw = alpha * 180/Math.PI;  
-    currentPitch = beta * 180/Math.PI;
-
+    // Landscape mode fix: swap gamma and beta
+    currentYaw = e.alpha; // yaw
+    currentPitch = e.gamma; // gamma acts as pitch in landscape
     if(menuSpawned) updateMenuPosition();
   }
 });
@@ -178,7 +168,7 @@ window.addEventListener('touchend', e=>{
   if(now - lastTap < 300){
     tapCount++;
     if(tapCount===2){ toggleMenu(); }
-    if(tapCount===3){ /* future triple-tap logic */ }
+    if(tapCount===3){ /* triple-tap future */ }
   } else { tapCount = 1; }
   lastTap = now;
 });
@@ -220,16 +210,16 @@ function updateMenuPosition(){
   menuRight.style.top = menuPos.yR + "px";
 }
 
-// Placeholder for future AR/WebXR 3D model support
+// Placeholder for AR/WebXR future 3D models
 async function startARSession() {
   if(!navigator.xr) return;
   try{
     const session = await navigator.xr.requestSession('immersive-ar', {requiredFeatures:['local-floor']});
     const refSpace = await session.requestReferenceSpace('local-floor');
-    // Can add 3D model rendering here in the future
+    // Future: render 3D objects anchored in real space
   } catch(err){ console.log("AR not supported or denied:", err); }
 }
-// startARSession(); // uncomment when using WebXR AR
+// startARSession(); // Uncomment to enable WebXR
 </script>
 </body>
 </html>
