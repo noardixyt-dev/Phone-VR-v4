@@ -6,97 +6,105 @@
 <title>Phone VR/MR Viewer</title>
 <style>
   html, body { margin: 0; padding: 0; overflow: hidden; background: #000; }
-  canvas.eye { border-radius: 12px; margin: 0 10px; background: #000; display: inline-block; }
-  #menu { position: absolute; padding: 15px; background: rgba(0,0,0,0.7); border-radius: 12px; color: white; font-family: sans-serif; display: none; z-index: 10; }
+  #menu { position: absolute; padding: 12px 18px; background: rgba(0,0,0,0.7); border-radius: 12px; color: white; font-family: sans-serif; display: none; z-index: 10; }
   #fovSlider, #fullscreenBtn { position: absolute; z-index: 10; }
   #fovSlider { top: 10px; left: 10px; width: 120px; }
   #fullscreenBtn { top: 10px; right: 10px; font-size: 16px; padding: 6px 12px; }
+  #startBtn { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 15px 25px; font-size: 18px; border-radius: 12px; background: #333; color: white; z-index: 20; }
 </style>
 </head>
 <body>
 <div id="menu">VR Menu</div>
 <input type="range" id="fovSlider" min="30" max="120" value="70">
 <button id="fullscreenBtn">Fullscreen</button>
+<button id="startBtn">Tap to Start VR</button>
 
 <script src="https://cdn.jsdelivr.net/npm/three@0.153.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.153.0/examples/js/loaders/GLTFLoader.js"></script>
-
 <script>
-(async ()=>{
-  const menu = document.getElementById('menu');
-  const fovSlider = document.getElementById('fovSlider');
-  const fullscreenBtn = document.getElementById('fullscreenBtn');
+let renderer, scene, cameraLeft, cameraRight, plane, video, videoTexture;
+let menu = document.getElementById('menu');
+let fovSlider = document.getElementById('fovSlider');
+let fullscreenBtn = document.getElementById('fullscreenBtn');
+let startBtn = document.getElementById('startBtn');
+let fovScale = 0.7;
+let menuVisible = false;
+let menuWorldYaw = 0;
 
-  let fovScale = 0.7;
-  let menuVisible = false;
-  let menuWorldYaw = 0;
-  let menuWorldPitch = 0;
+startBtn.addEventListener('click', async () => {
+  startBtn.style.display = 'none';
 
-  const renderer = new THREE.WebGLRenderer({antialias:true});
+  video = document.createElement('video');
+  video.autoplay = true;
+  video.playsInline = true;
+  video.muted = true; // allow autoplay
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+    video.srcObject = stream;
+    await video.play();
+  } catch (e) {
+    alert('Camera access denied or not supported.');
+    return;
+  }
+
+  initThreeJS();
+});
+
+function initThreeJS() {
+  renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
   document.body.appendChild(renderer.domElement);
 
-  const scene = new THREE.Scene();
+  scene = new THREE.Scene();
 
-  // Two cameras for stereoscopic effect
-  const cameraLeft = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 1000);
-  const cameraRight = cameraLeft.clone();
-  const ipd = 0.03; // interpupillary distance
+  cameraLeft = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 1000);
+  cameraRight = cameraLeft.clone();
+  const ipd = 0.03;
   cameraLeft.position.x = -ipd/2;
   cameraRight.position.x = ipd/2;
 
-  // Video feed setup
-  const video = document.createElement('video');
-  video.autoplay = true;
-  video.playsInline = true;
-
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}, audio:false});
-    video.srcObject = stream;
-    await video.play();
-  } catch(e){ alert('Camera access denied or not supported.'); return; }
-
-  const videoTexture = new THREE.VideoTexture(video);
-  const aspect = 1.5; // 1.5:1 rectangle for eye view
+  videoTexture = new THREE.VideoTexture(video);
+  const aspect = 1.5; // 1.5:1 for FOV
   const geometry = new THREE.PlaneGeometry(aspect,1);
-  const material = new THREE.MeshBasicMaterial({map:videoTexture});
-  const plane = new THREE.Mesh(geometry, material);
+  const material = new THREE.MeshBasicMaterial({ map: videoTexture });
+  plane = new THREE.Mesh(geometry, material);
   plane.position.z = -2;
   scene.add(plane);
 
-  // Menu placement variables
-  let lastTap = 0;
+  // Example 3D model
+  const loader = new THREE.GLTFLoader();
+  loader.load('https://threejs.org/examples/models/gltf/DamagedHelmet/glTF/DamagedHelmet.gltf', gltf=>{
+    const model = gltf.scene;
+    model.position.set(0, -0.5, -1.5);
+    scene.add(model);
+  });
 
   // Double-tap to toggle menu
-  window.addEventListener('touchend', e=>{
+  let lastTap = 0;
+  window.addEventListener('touchend', e => {
     const now = Date.now();
-    if(now - lastTap < 300){
+    if (now - lastTap < 300) {
       menuVisible = !menuVisible;
-      menu.style.display = menuVisible ? 'block':'none';
-      if(menuVisible){
-        // Initialize menu world position based on current head yaw/pitch
-        menuWorldYaw = 0;
-        menuWorldPitch = 0;
-      }
+      menu.style.display = menuVisible ? 'block' : 'none';
+      if(menuVisible) menuWorldYaw = 0;
     }
     lastTap = now;
   });
 
-  // Device orientation for menu anchoring
+  // Device orientation to track menu (yaw only)
   window.addEventListener('deviceorientation', e=>{
     if(!menuVisible) return;
-    const gamma = e.gamma || 0; // yaw
-    const beta = e.beta || 0;   // pitch
+    const gamma = e.gamma || 0;
     const centerX = window.innerWidth/2 - menu.offsetWidth/2;
     const centerY = window.innerHeight/2 - menu.offsetHeight/2;
-    // Menu stays anchored; yaw moves horizontally
     menu.style.left = `${centerX + (menuWorldYaw - gamma)*2}px`;
-    menu.style.top = `${centerY}px`; // pitch ignored for horizon lock
+    menu.style.top = `${centerY}px`; // horizon-locked
   });
 
   fovSlider.addEventListener('input', ()=>{
-    fovScale = fovSlider.value / 100;
-    plane.scale.set(fovScale, fovScale, 1);
+    fovScale = fovSlider.value/100;
+    plane.scale.set(fovScale,fovScale,1);
   });
 
   fullscreenBtn.addEventListener('click', ()=>{
@@ -111,28 +119,20 @@
     cameraRight.updateProjectionMatrix();
   });
 
-  // Load example 3D model
-  const loader = new THREE.GLTFLoader();
-  let model;
-  loader.load('https://threejs.org/examples/models/gltf/DamagedHelmet/glTF/DamagedHelmet.gltf', gltf=>{
-    model = gltf.scene;
-    model.position.set(0, -0.5, -1.5);
-    scene.add(model);
-  });
-
-  // Animation loop
-  function animate(){
-    requestAnimationFrame(animate);
-    renderer.clear();
-    // Render for left eye
-    renderer.setViewport(0,0,window.innerWidth/2,window.innerHeight);
-    renderer.render(scene,cameraLeft);
-    // Render for right eye
-    renderer.setViewport(window.innerWidth/2,0,window.innerWidth/2,window.innerHeight);
-    renderer.render(scene,cameraRight);
-  }
   animate();
-})();
+}
+
+function animate(){
+  requestAnimationFrame(animate);
+  if(!renderer) return;
+  renderer.clear();
+  // Left eye
+  renderer.setViewport(0,0,window.innerWidth/2,window.innerHeight);
+  renderer.render(scene,cameraLeft);
+  // Right eye
+  renderer.setViewport(window.innerWidth/2,0,window.innerWidth/2,window.innerHeight);
+  renderer.render(scene,cameraRight);
+}
 </script>
 </body>
 </html>
