@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>VR Camera Viewer</title>
+<title>VR Camera Viewer Fixed</title>
 <style>
 html, body {margin:0; height:100%; background:black; overflow:hidden; font-family:sans-serif;}
-#container {display:flex; justify-content:center; align-items:center; height:100%; width:100%; position:relative;}
+#container {position:relative; width:100%; height:100%; display:flex; justify-content:center; align-items:center;}
 canvas {background:#000; border-radius:12px;}
-#canvasLeft {margin-right:5vw;}
-#canvasRight {margin-left:5vw;}
-canvas.small {width:35vw; height:35vw;} /* smaller than before for more FOV */
+canvas.eye {width:40vw; height:auto;} /* width constrained, height scales to aspect ratio */
+canvas#canvasLeft {margin-right:5vw;}
+canvas#canvasRight {margin-left:5vw;}
 .menu {
   position:absolute;
   background:rgba(0,0,0,0.6);
@@ -38,11 +38,12 @@ button:hover {background: rgba(255,255,255,0.25);}
 </head>
 <body>
 <div id="container">
-  <canvas id="canvasLeft" class="small"></canvas>
-  <canvas id="canvasRight" class="small"></canvas>
+  <canvas id="canvasLeft" class="eye"></canvas>
+  <canvas id="canvasRight" class="eye"></canvas>
   <div class="menu" id="menuLeft">TEST</div>
   <div class="menu" id="menuRight">TEST</div>
 </div>
+
 <div id="controls">
   <button id="startBtn">Start Camera</button>
   <button id="fullscreenBtn">Fullscreen</button>
@@ -53,44 +54,52 @@ const canvasLeft = document.getElementById('canvasLeft');
 const canvasRight = document.getElementById('canvasRight');
 const ctxLeft = canvasLeft.getContext('2d');
 const ctxRight = canvasRight.getContext('2d');
-
 const menuLeft = document.getElementById('menuLeft');
 const menuRight = document.getElementById('menuRight');
-
 const startBtn = document.getElementById('startBtn');
 const fullscreenBtn = document.getElementById('fullscreenBtn');
+const controls = document.getElementById('controls');
 
+let video;
 let videoStream;
 let menuVisible = false;
 let uiVisible = true;
 let lastTap = 0;
 let tapCount = 0;
+let menuRefOrientation = null;
 
-// Start camera and draw to canvas
+// Resize canvas to match video natural size
+function resizeCanvas(){
+  if(!video) return;
+  canvasLeft.width = video.videoWidth;
+  canvasLeft.height = video.videoHeight;
+  canvasRight.width = video.videoWidth;
+  canvasRight.height = video.videoHeight;
+}
+window.addEventListener('resize', resizeCanvas);
+
+// Start camera
 async function startCamera(){
   try{
     videoStream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}, audio:false});
-    const video = document.createElement('video');
+    video = document.createElement('video');
     video.srcObject = videoStream;
     video.autoplay = true;
     video.playsInline = true;
     video.muted = true;
-
     video.onloadedmetadata = ()=>{
       video.play();
-      drawLoop(video);
+      resizeCanvas();
+      drawLoop();
     };
   }catch(e){alert("Camera access failed: "+e.message);}
 }
 
-// Draw video to both canvases
-function drawLoop(video){
-  const draw = ()=>{
-    ctxLeft.drawImage(video, 0, 0, canvasLeft.width, canvasLeft.height);
-    ctxRight.drawImage(video, 0, 0, canvasRight.width, canvasRight.height);
-    requestAnimationFrame(draw);
-  };
-  draw();
+// Draw video feed to both canvases
+function drawLoop(){
+  ctxLeft.drawImage(video,0,0,canvasLeft.width,canvasLeft.height);
+  ctxRight.drawImage(video,0,0,canvasRight.width,canvasRight.height);
+  requestAnimationFrame(drawLoop);
 }
 
 // Fullscreen toggle
@@ -103,50 +112,54 @@ fullscreenBtn.onclick = ()=>{
     showUI();
   }
 };
+function hideUI(){controls.style.display='none'; uiVisible=false;}
+function showUI(){controls.style.display='flex'; uiVisible=true;}
 
-// Show/hide UI
-function hideUI(){document.getElementById('controls').style.display='none'; uiVisible=false;}
-function showUI(){document.getElementById('controls').style.display='flex'; uiVisible=true;}
+// DeviceOrientation for world-locked menu
+let currentOrientation = {alpha:0,beta:0,gamma:0};
+window.addEventListener('deviceorientation', (e)=>{
+  currentOrientation = {alpha:e.alpha||0, beta:e.beta||0, gamma:e.gamma||0};
+  if(menuVisible && menuRefOrientation){
+    const deltaAlpha = currentOrientation.alpha - menuRefOrientation.alpha;
+    const deltaBeta  = currentOrientation.beta  - menuRefOrientation.beta;
+    const deltaGamma = currentOrientation.gamma - menuRefOrientation.gamma;
 
-// Double-tap menu / Triple-tap UI
+    // simple projection to 2D screen
+    const maxShift = 100;
+    const xShift = Math.max(-maxShift, Math.min(maxShift, deltaGamma*1.5));
+    const yShift = Math.max(-maxShift, Math.min(maxShift, deltaBeta*1.2));
+
+    // position menus over each eye canvas
+    const rectL = canvasLeft.getBoundingClientRect();
+    const rectR = canvasRight.getBoundingClientRect();
+    menuLeft.style.left = rectL.left + rectL.width/2 + xShift + 'px';
+    menuLeft.style.top  = rectL.top  + rectL.height/2 + yShift + 'px';
+    menuRight.style.left = rectR.left + rectR.width/2 + xShift + 'px';
+    menuRight.style.top  = rectR.top  + rectR.height/2 + yShift + 'px';
+  }
+});
+
+// Tap detection: double-tap for menu, triple-tap for UI
 document.body.addEventListener('touchend', ()=>{
   const now = Date.now();
   if(now - lastTap < 300){
     tapCount++;
     if(tapCount === 2){
-      // Double-tap detected -> toggle menu
+      // double-tap -> toggle menu
       menuVisible = !menuVisible;
       menuLeft.style.display = menuVisible?'block':'none';
       menuRight.style.display = menuVisible?'block':'none';
-      // center menu over each canvas
-      const rectL = canvasLeft.getBoundingClientRect();
-      const rectR = canvasRight.getBoundingClientRect();
-      menuLeft.style.left = rectL.left + rectL.width/2 + 'px';
-      menuLeft.style.top  = rectL.top  + rectL.height/2 + 'px';
-      menuRight.style.left = rectR.left + rectR.width/2 + 'px';
-      menuRight.style.top  = rectR.top  + rectR.height/2 + 'px';
+      if(menuVisible) menuRefOrientation = {...currentOrientation};
     } else if(tapCount === 3){
-      // Triple-tap -> toggle UI in fullscreen
+      // triple-tap -> toggle UI buttons in fullscreen
       if(document.fullscreenElement){
         if(uiVisible) hideUI(); else showUI();
       }
       tapCount = 0;
     }
-  } else {
-    tapCount = 1;
-  }
+  } else tapCount = 1;
   lastTap = now;
 });
-
-// Resize canvases to match display size
-function resizeCanvas(){
-  canvasLeft.width = canvasLeft.clientWidth;
-  canvasLeft.height = canvasLeft.clientHeight;
-  canvasRight.width = canvasRight.clientWidth;
-  canvasRight.height = canvasRight.clientHeight;
-}
-window.addEventListener('resize', resizeCanvas);
-resizeCanvas();
 
 startBtn.onclick = startCamera;
 </script>
