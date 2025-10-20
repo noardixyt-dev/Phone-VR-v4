@@ -3,14 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Phone VR/MR Viewer</title>
+<title>Phone VR Viewer</title>
 <style>
-  html, body { margin: 0; padding: 0; overflow: hidden; background: #000; }
-  #menu { position: absolute; padding: 12px 18px; background: rgba(0,0,0,0.7); border-radius: 12px; color: white; font-family: sans-serif; display: none; z-index: 10; }
-  #fovSlider, #fullscreenBtn { position: absolute; z-index: 10; }
-  #fovSlider { top: 10px; left: 10px; width: 120px; }
-  #fullscreenBtn { top: 10px; right: 10px; font-size: 16px; padding: 6px 12px; }
-  #startBtn { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 15px 25px; font-size: 18px; border-radius: 12px; background: #333; color: white; z-index: 20; }
+html, body { margin:0; padding:0; overflow:hidden; background:#000; }
+#menu { position:absolute; padding:12px 18px; background:rgba(0,0,0,0.7); border-radius:12px; color:white; font-family:sans-serif; display:none; z-index:10; }
+#fovSlider, #fullscreenBtn { position:absolute; z-index:10; }
+#fovSlider { top:10px; left:10px; width:120px; }
+#fullscreenBtn { top:10px; right:10px; font-size:16px; padding:6px 12px; }
+#startBtn { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); padding:15px 25px; font-size:18px; border-radius:12px; background:#333; color:white; z-index:20; }
 </style>
 </head>
 <body>
@@ -29,50 +29,56 @@ let fullscreenBtn = document.getElementById('fullscreenBtn');
 let startBtn = document.getElementById('startBtn');
 let fovScale = 0.7;
 let menuVisible = false;
-let menuWorldYaw = 0;
+
+// Menu world position in spherical coordinates
+let menuYaw = 0; // left/right
+let menuPitch = 0; // up/down
+let menuDistance = 1.5; // distance from camera
+let menuScreenPos = {x:0, y:0};
 
 startBtn.addEventListener('click', async () => {
   startBtn.style.display = 'none';
-
   video = document.createElement('video');
   video.autoplay = true;
   video.playsInline = true;
-  video.muted = true; // allow autoplay
+  video.muted = true;
 
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+    const stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment' }, audio:false });
     video.srcObject = stream;
     await video.play();
-  } catch (e) {
+  } catch(e){
     alert('Camera access denied or not supported.');
     return;
   }
 
-  initThreeJS();
+  video.addEventListener('canplay', ()=>initThreeJS());
 });
 
-function initThreeJS() {
-  renderer = new THREE.WebGLRenderer({ antialias: true });
+function initThreeJS(){
+  renderer = new THREE.WebGLRenderer({antialias:true});
   renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.autoClear = true;
   document.body.appendChild(renderer.domElement);
 
   scene = new THREE.Scene();
 
-  cameraLeft = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 1000);
+  cameraLeft = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 1000);
   cameraRight = cameraLeft.clone();
-  const ipd = 0.03;
-  cameraLeft.position.x = -ipd/2;
-  cameraRight.position.x = ipd/2;
+  let baseIPD = 0.03;
+  cameraLeft.position.x = -baseIPD/2;
+  cameraRight.position.x = baseIPD/2;
 
   videoTexture = new THREE.VideoTexture(video);
-  const aspect = 1.5; // 1.5:1 for FOV
+  const aspect = 1.5;
   const geometry = new THREE.PlaneGeometry(aspect,1);
   const material = new THREE.MeshBasicMaterial({ map: videoTexture });
   plane = new THREE.Mesh(geometry, material);
   plane.position.z = -2;
+  plane.material.map.minFilter = THREE.LinearFilter;
   scene.add(plane);
 
-  // Example 3D model
+  // Example AR model
   const loader = new THREE.GLTFLoader();
   loader.load('https://threejs.org/examples/models/gltf/DamagedHelmet/glTF/DamagedHelmet.gltf', gltf=>{
     const model = gltf.scene;
@@ -80,31 +86,37 @@ function initThreeJS() {
     scene.add(model);
   });
 
-  // Double-tap to toggle menu
+  // Double-tap menu toggle
   let lastTap = 0;
-  window.addEventListener('touchend', e => {
+  window.addEventListener('touchend', e=>{
     const now = Date.now();
-    if (now - lastTap < 300) {
+    if(now - lastTap < 300){
       menuVisible = !menuVisible;
       menu.style.display = menuVisible ? 'block' : 'none';
-      if(menuVisible) menuWorldYaw = 0;
+      if(menuVisible){
+        menuYaw = 0;
+        menuPitch = 0;
+      }
     }
     lastTap = now;
   });
 
-  // Device orientation to track menu (yaw only)
+  // Device orientation
   window.addEventListener('deviceorientation', e=>{
     if(!menuVisible) return;
-    const gamma = e.gamma || 0;
-    const centerX = window.innerWidth/2 - menu.offsetWidth/2;
-    const centerY = window.innerHeight/2 - menu.offsetHeight/2;
-    menu.style.left = `${centerX + (menuWorldYaw - gamma)*2}px`;
-    menu.style.top = `${centerY}px`; // horizon-locked
+    // In landscape, map roll -> pitch, gamma -> yaw
+    const gamma = e.gamma || 0; // side-to-side
+    const beta = e.beta || 0;   // front-back
+    menuYaw = -gamma;
+    menuPitch = -beta;
   });
 
   fovSlider.addEventListener('input', ()=>{
     fovScale = fovSlider.value/100;
     plane.scale.set(fovScale,fovScale,1);
+    let ipd = 0.03*fovScale;
+    cameraLeft.position.x = -ipd/2;
+    cameraRight.position.x = ipd/2;
   });
 
   fullscreenBtn.addEventListener('click', ()=>{
@@ -125,10 +137,23 @@ function initThreeJS() {
 function animate(){
   requestAnimationFrame(animate);
   if(!renderer) return;
+
+  // Menu position calculation (world-anchored)
+  if(menuVisible){
+    const centerX = window.innerWidth/2 - menu.offsetWidth/2;
+    const centerY = window.innerHeight/2 - menu.offsetHeight/2;
+    menuScreenPos.x = centerX + menuYaw*window.innerWidth/4;
+    menuScreenPos.y = centerY + menuPitch*window.innerHeight/4;
+    menu.style.left = `${menuScreenPos.x}px`;
+    menu.style.top = `${menuScreenPos.y}px`;
+  }
+
   renderer.clear();
+
   // Left eye
   renderer.setViewport(0,0,window.innerWidth/2,window.innerHeight);
   renderer.render(scene,cameraLeft);
+
   // Right eye
   renderer.setViewport(window.innerWidth/2,0,window.innerWidth/2,window.innerHeight);
   renderer.render(scene,cameraRight);
