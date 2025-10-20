@@ -24,6 +24,7 @@ html, body {
   align-items: center;
   width: 100%;
   height: 100%;
+  transition: transform 0.05s linear;
 }
 
 .eye-container {
@@ -56,7 +57,7 @@ html, body {
   font-size: 18px;
   color: #000;
   pointer-events: none;
-  visibility: visible;
+  visibility: hidden;
 }
 
 #fullscreen-btn, #fov-slider, #xaxis-slider, #xaxis-label {
@@ -104,53 +105,44 @@ html, body {
 <button id="fullscreen-btn">Fullscreen</button>
 <input type="range" id="fov-slider" min="20" max="50" value="45">
 <label id="xaxis-label">X-Axis Movement</label>
-<input type="range" id="xaxis-slider" min="-20" max="20" value="0">
+<input type="range" id="xaxis-slider" min="-50" max="50" value="0">
 
 <script>
 const leftEye = document.getElementById('left-eye');
 const rightEye = document.getElementById('right-eye');
 const leftContainer = document.getElementById('left-eye-container');
 const rightContainer = document.getElementById('right-eye-container');
+const vrContainer = document.getElementById('vr-container');
 const menuLeft = document.getElementById('menu-left');
 const menuRight = document.getElementById('menu-right');
 const fullscreenBtn = document.getElementById('fullscreen-btn');
 const fovSlider = document.getElementById('fov-slider');
 const xaxisSlider = document.getElementById('xaxis-slider');
 
-let currentYaw = 0;
-let currentPitch = 0;
-let menuYaw = 0;
-let menuPitch = 0;
+let currentYaw = 0, currentPitch = 0;
+let menuYaw = 0, menuPitch = 0;
 let menuSpawned = false;
 
 let menuPos = {xL:0, yL:0, xR:0, yR:0};
-const yawMultiplier = 1.0;       // horizontal movement scaling
-const pitchMultiplier = 1.5;     // vertical movement scaling, like YouTube VR
-const smoothing = 0.25;           // responsiveness
-
+const yawMultiplier = 1.0;
+const pitchMultiplier = 1.5;
+const smoothing = 0.25;
 const baseGap = 20;
 const defaultWidth = 45;
-
-// X-axis movement
 let xOffset = 0;
 
-// Start camera automatically
+// Camera
 async function startCamera() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
-      video: { width: {ideal:3840}, height:{ideal:2160}, facingMode:'environment' },
+      video: { width:{ideal:3840}, height:{ideal:2160}, facingMode:'environment' },
       audio: false
     });
     leftEye.srcObject = stream;
     rightEye.srcObject = stream;
-    leftEye.onloadedmetadata = () => leftEye.play();
-    rightEye.onloadedmetadata = () => rightEye.play();
-  } catch(err) {
-    console.error("Camera error:", err);
-    alert("Could not access camera. Please allow permissions.");
-  }
+    leftEye.onloadedmetadata = rightEye.onloadedmetadata = () => { leftEye.play(); rightEye.play(); };
+  } catch(err){ alert("Camera access denied."); console.error(err);}
 }
-
 startCamera();
 
 // Fullscreen
@@ -159,47 +151,36 @@ fullscreenBtn.addEventListener('click', () => {
   else document.documentElement.requestFullscreen();
 });
 
-// Eye scale slider with dynamic gap
+// Eye scaling and gap
 function updateEyeScaleAndGap() {
   const scale = fovSlider.value + '%';
   leftContainer.style.width = scale;
   rightContainer.style.width = scale;
-
   const dynamicGap = baseGap * (fovSlider.value / defaultWidth);
   leftContainer.style.marginLeft = dynamicGap/2 + "px";
   leftContainer.style.marginRight = dynamicGap/2 + "px";
   rightContainer.style.marginLeft = dynamicGap/2 + "px";
   rightContainer.style.marginRight = dynamicGap/2 + "px";
-
-  // Apply X-axis offset
-  leftContainer.style.transform = `translateX(${xOffset}px)`;
-  rightContainer.style.transform = `translateX(${xOffset}px)`;
+  vrContainer.style.transform = `translateX(${xOffset}px)`;
 }
 updateEyeScaleAndGap();
 fovSlider.addEventListener('input', updateEyeScaleAndGap);
-xaxisSlider.addEventListener('input', () => {
-  xOffset = xaxisSlider.value + "px";
-  updateEyeScaleAndGap();
-});
+xaxisSlider.addEventListener('input', () => { xOffset = xaxisSlider.value + "px"; updateEyeScaleAndGap(); });
 
 // Device orientation
-window.addEventListener('deviceorientation', (event) => {
-  if(event.alpha !== null && event.beta !== null){
-    currentYaw = event.alpha;
-    currentPitch = event.beta;
+window.addEventListener('deviceorientation', e=>{
+  if(e.alpha!==null && e.beta!==null){
+    currentYaw = e.alpha;
+    currentPitch = e.beta;
     if(menuSpawned) updateMenuPosition();
   }
 });
 
-// Double-tap detection
+// Double tap detection
 let lastTap = 0;
-window.addEventListener('touchend', (e) => {
+window.addEventListener('touchend', e=>{
   const now = new Date().getTime();
-  if(now - lastTap < 300 && now - lastTap > 0){
-    spawnMenu();
-    e.preventDefault();
-    e.stopPropagation();
-  }
+  if(now - lastTap < 300 && now - lastTap > 0){ spawnMenu(); e.preventDefault(); e.stopPropagation();}
   lastTap = now;
 });
 
@@ -210,11 +191,11 @@ function spawnMenu(){
 }
 
 // Lerp helper
-function lerp(a, b, t){ return a + (b - a) * t; }
+function lerp(a,b,t){ return a+(b-a)*t; }
 
-// Menu projection relative to spawn yaw/pitch (world-locked)
-function updateMenuPosition() {
-  const fov = 100;
+// Menu position projection (world-locked)
+function updateMenuPosition(){
+  const fov = 100; 
   const vFov = 80;
 
   const deltaYaw = ((menuYaw - currentYaw + 540) % 360) - 180;
@@ -223,10 +204,10 @@ function updateMenuPosition() {
   const lRect = leftContainer.getBoundingClientRect();
   const rRect = rightContainer.getBoundingClientRect();
 
-  const targetXL = (lRect.width/2) + (deltaYaw/(fov/2))* (lRect.width/2) * yawMultiplier - menuLeft.offsetWidth/2;
-  const targetYL = (lRect.height/2) + (deltaPitch/(vFov/2)) * (lRect.height/2) * pitchMultiplier - menuLeft.offsetHeight/2;
-  const targetXR = (rRect.width/2) + (deltaYaw/(fov/2)) * (rRect.width/2) * yawMultiplier - menuRight.offsetWidth/2;
-  const targetYR = (rRect.height/2) + (deltaPitch/(vFov/2)) * (rRect.height/2) * pitchMultiplier - menuRight.offsetHeight/2;
+  const targetXL = (lRect.width/2) - (deltaYaw/(fov/2))* (lRect.width/2) * yawMultiplier - menuLeft.offsetWidth/2;
+  const targetYL = (lRect.height/2) - (deltaPitch/(vFov/2)) * (lRect.height/2) * pitchMultiplier - menuLeft.offsetHeight/2;
+  const targetXR = (rRect.width/2) - (deltaYaw/(fov/2))* (rRect.width/2) * yawMultiplier - menuRight.offsetWidth/2;
+  const targetYR = (rRect.height/2) - (deltaPitch/(vFov/2)) * (rRect.height/2) * pitchMultiplier - menuRight.offsetHeight/2;
 
   menuPos.xL = lerp(menuPos.xL, targetXL, smoothing);
   menuPos.yL = lerp(menuPos.yL, targetYL, smoothing);
