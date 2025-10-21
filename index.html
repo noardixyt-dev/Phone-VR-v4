@@ -1,252 +1,322 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Phone VR Viewer</title>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover" />
+<title>Phone VR Viewer — fixed</title>
 <style>
-/* Basiseinstellungen */
-html, body { margin:0; padding:0; overflow:hidden; background:#000; }
-
-/* Steuerelemente (werden nach dem Start sichtbar) */
-#fovSlider, #fullscreenBtn { position:absolute; z-index:10; }
-#fovSlider { top:10px; left:10px; width:120px; }
-#fullscreenBtn { top:10px; right:10px; font-size:16px; padding:6px 12px; }
-
-/* Start-Button */
-#startBtn { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); padding:15px 25px; font-size:18px; border-radius:12px; background:#333; color:white; z-index:20; }
-
-/* Steuerelemente zu Beginn verstecken */
-#fovSlider, #fullscreenBtn { display: none; } 
+  html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#000}
+  #fovSlider,#fullscreenBtn{position:absolute;z-index:10}
+  #fovSlider{top:10px;left:10px;width:140px;display:none}
+  #fullscreenBtn{top:10px;right:10px;font-size:16px;padding:6px 12px;display:none}
+  #startBtn{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);padding:14px 20px;border-radius:10px;background:#222;color:#fff;z-index:20}
 </style>
 </head>
 <body>
-<input type="range" id="fovSlider" min="30" max="120" value="70">
+<input id="fovSlider" type="range" min="30" max="120" value="70" />
 <button id="fullscreenBtn">Fullscreen</button>
 <button id="startBtn">Tap to Start VR</button>
 
 <script src="https://cdn.jsdelivr.net/npm/three@0.153.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.153.0/examples/js/loaders/GLTFLoader.js"></script>
+
 <script>
-let renderer, scene, cameraLeft, cameraRight, plane, video, videoTexture;
+/* TL;DR: major fixes — compute video plane from camera frustum, use emissive-capable material,
+   set cursor as world point from camera direction, update raycaster using normalized device coords,
+   add lights, update renderer size & pixelRatio, and fix viewport render split. */
+
+let renderer, scene, cameraBase, cameraLeft, cameraRight;
+let video, videoTexture, videoPlane;
 let fovSlider = document.getElementById('fovSlider');
 let fullscreenBtn = document.getElementById('fullscreenBtn');
 let startBtn = document.getElementById('startBtn');
-let fovScale = 0.7;
-let menuVisible = false;
 
-// Globale Variablen für Interaktion und 3D-Objekte
-let cursorMesh;
-let menuButtonMesh; 
-let interactiveObjects = []; 
+let menuButtonMesh, cursorMesh;
+let interactiveObjects = [];
 const raycaster = new THREE.Raycaster();
-const cursorPosition = new THREE.Vector2(0, 0); 
-let INTERSECTED = null; 
+const cursorNDC = new THREE.Vector2(0, 0); // normalized device coords (-1..1). default center gaze
+let INTERSECTED = null;
+let menuVisible = false;
+let lastTap = 0;
+let baseIPD = 0.03; // meters (scaled)
+let fovDeg = parseFloat(fovSlider.value);
 
-
-// --- START: INITIALISIERUNG DES VR-VIEWERS ---
 startBtn.addEventListener('click', async () => {
-  // 1. Fullscreen anfordern (muss durch Benutzer-Tap ausgelöst werden)
-  if(document.documentElement.requestFullscreen) {
-    document.documentElement.requestFullscreen();
-  }
-  
+  // fullscreen (user gesture)
+  if (document.documentElement.requestFullscreen) await document.documentElement.requestFullscreen();
   startBtn.style.display = 'none';
   fullscreenBtn.style.display = 'block';
   fovSlider.style.display = 'block';
 
-  // Video-Element für den Kamerastream erstellen
+  // create hidden video element
   video = document.createElement('video');
-  video.autoplay = true;
-  video.playsInline = true;
+  video.setAttribute('playsinline','');
   video.muted = true;
-  video.style.display = 'none'; 
+  video.autoplay = true;
+  video.style.display = 'none';
   document.body.appendChild(video);
 
   try {
-    // 2. Kamerazugriff anfordern
-    const stream = await navigator.mediaDevices.getUserMedia({ 
-        video:{ facingMode:'environment' }, audio:false 
-    });
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
     video.srcObject = stream;
-    
-    // 3. Warten, bis das Video geladen und spielbereit ist
+    // wait until we can play
     video.addEventListener('loadedmetadata', async () => {
-        await video.play();
-        initThreeJS(); // Three.js erst jetzt starten
+      try { await video.play(); } catch(e){ console.warn('video.play blocked', e); }
+      initThreeJS();
     }, { once: true });
-    
-  } catch(e){
-    alert('Kamerazugriff verweigert oder nicht unterstützt. Fehler: ' + e.message);
+  } catch (err) {
+    alert('Camera access denied or not available: ' + err.message);
     startBtn.style.display = 'block';
   }
 });
 
+fullscreenBtn.addEventListener('click', () => {
+  if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+  else document.exitFullscreen();
+});
 
-function initThreeJS(){
-  // Renderer
-  renderer = new THREE.WebGLRenderer({antialias:true});
+function initThreeJS() {
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(window.devicePixelRatio || 1);
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.autoClear = true;
   document.body.appendChild(renderer.domElement);
 
   scene = new THREE.Scene();
 
-  // Kameras (Links & Rechts)
-  cameraLeft = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 1000);
-  cameraRight = cameraLeft.clone();
-  let baseIPD = 0.03;
-  cameraLeft.position.x = -baseIPD/2;
-  cameraRight.position.x = baseIPD/2;
+  // base camera (we'll clone for left/right)
+  cameraBase = new THREE.PerspectiveCamera(fovDeg, window.innerWidth / window.innerHeight, 0.01, 1000);
+  cameraBase.position.set(0, 0, 0);
+  cameraLeft = cameraBase.clone();
+  cameraRight = cameraBase.clone();
 
-  // Video-Hintergrund (Kamera-Feed)
+  // lighting (needed for emissive/higher-quality button material)
+  const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+  const dir = new THREE.DirectionalLight(0xffffff, 0.6);
+  dir.position.set(1, 2, 3);
+  scene.add(ambient, dir);
+
+  // Video texture & plane filling view at distance `planeDist`
   videoTexture = new THREE.VideoTexture(video);
   videoTexture.minFilter = THREE.LinearFilter;
   videoTexture.magFilter = THREE.LinearFilter;
   videoTexture.format = THREE.RGBAFormat;
 
-  const aspect = video.videoWidth / video.videoHeight;
-  const geometry = new THREE.PlaneGeometry(aspect, 1);
-  const material = new THREE.MeshBasicMaterial({ map: videoTexture, depthWrite: false });
-  plane = new THREE.Mesh(geometry, material);
-  plane.position.z = -2;
-  scene.add(plane);
+  const planeMaterial = new THREE.MeshBasicMaterial({ map: videoTexture, depthWrite: false });
+  // placeholder plane — we will size it correctly in updateVideoPlane()
+  const planeGeom = new THREE.PlaneGeometry(2, 1);
+  videoPlane = new THREE.Mesh(planeGeom, planeMaterial);
+  videoPlane.material.side = THREE.DoubleSide;
+  // place plane in front of camera base at a fixed distance
+  scene.add(videoPlane);
 
-  // Beispiel AR-Modell (Helm)
+  // optional 3D model (keep your loader)
   const loader = new THREE.GLTFLoader();
-  loader.load('https://threejs.org/examples/models/gltf/DamagedHelmet/glTF/DamagedHelmet.gltf', gltf=>{
+  loader.load('https://threejs.org/examples/models/gltf/DamagedHelmet/glTF/DamagedHelmet.gltf', (gltf) => {
     const model = gltf.scene;
-    model.position.set(0, -0.5, -1.5);
+    model.position.set(0, -0.4, -1.5);
+    model.scale.setScalar(1.0);
     scene.add(model);
+  }, undefined, (err) => {
+    console.warn('GLTF load error', err);
   });
-  
-  // --- Gaze Cursor Setup ---
-  const cursorGeometry = new THREE.RingGeometry(0.005, 0.01, 32);
-  const cursorMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
-  cursorMesh = new THREE.Mesh(cursorGeometry, cursorMaterial);
-  cursorMesh.position.set(0, 0, -1.0); 
-  cursorMesh.visible = false; 
+
+  // Cursor: ring that will be placed in world in front of camera along look direction
+  const cursorGeo = new THREE.RingGeometry(0.01, 0.02, 32);
+  const cursorMat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+  cursorMesh = new THREE.Mesh(cursorGeo, cursorMat);
+  cursorMesh.visible = false;
   scene.add(cursorMesh);
-  
-  // --- World-Locked Menu Button Setup ---
-  const buttonGeometry = new THREE.BoxGeometry(0.4, 0.2, 0.05);
-  const buttonMaterial = new THREE.MeshBasicMaterial({ color: 0x3333ff });
-  
-  menuButtonMesh = new THREE.Mesh(buttonGeometry, buttonMaterial);
-  menuButtonMesh.position.set(0, -0.2, -1.4); 
-  menuButtonMesh.rotation.x = Math.PI * -0.1; 
-  
-  // Klick-Aktion des Buttons
-  menuButtonMesh.userData = { 
-      type: 'button',
-      name: 'Test Button',
-      onClick: () => {
-          console.log('Button geklickt!');
-          menuButtonMesh.material.color.set(Math.random() * 0xffffff); 
-      }
-  };
-  
-  menuButtonMesh.visible = false; 
-  scene.add(menuButtonMesh);
-  interactiveObjects.push(menuButtonMesh); 
 
-  // --- Double-Tap für Menü-Toggle & Single-Tap für Klick ---
-  let lastTap = 0;
-  window.addEventListener('touchend', e=>{
-    const now = Date.now();
-    
-    // 1. Gaze-Klick-Logik (Single Tap)
-    if (INTERSECTED) {
-        INTERSECTED.userData.onClick();
-        return; 
+  // Menu button: use a material with emissive support; use small depth so it appears a button.
+  const buttonGeom = new THREE.BoxGeometry(0.4, 0.2, 0.04);
+  const buttonMat = new THREE.MeshStandardMaterial({ color: 0x3333ff, emissive: 0x000000, roughness: 0.6, metalness: 0.1 });
+  menuButtonMesh = new THREE.Mesh(buttonGeom, buttonMat);
+  menuButtonMesh.position.set(0, -0.2, -1.4);
+  menuButtonMesh.rotation.x = -0.1;
+  menuButtonMesh.visible = false;
+  menuButtonMesh.userData = {
+    type: 'button',
+    name: 'Test Button',
+    onClick: () => {
+      console.log('Button clicked!');
+      menuButtonMesh.material.color.set(Math.random() * 0xffffff);
     }
+  };
+  scene.add(menuButtonMesh);
+  interactiveObjects.push(menuButtonMesh);
 
-    // 2. Menü-Toggle-Logik (Double Tap)
-    if(now - lastTap < 300){
+  // initial layout and sizing
+  updateCameraFOV(fovDeg);
+  updateVideoPlane();
+  onWindowResize();
+
+  // FOV slider behavior
+  fovSlider.addEventListener('input', () => {
+    fovDeg = parseFloat(fovSlider.value);
+    updateCameraFOV(fovDeg);
+    updateVideoPlane();
+  });
+
+  // pointer/touch events: allow moving gaze with touch, and handle tap & double-tap
+  let touchMoveActive = false;
+  window.addEventListener('pointermove', (ev) => {
+    if (ev.pointerType === 'touch' || ev.pointerType === 'pen' || ev.pointerType === 'mouse') {
+      // convert to NDC for raycasting
+      const x = (ev.clientX / window.innerWidth) * 2 - 1;
+      const y = -(ev.clientY / window.innerHeight) * 2 + 1;
+      cursorNDC.set(x, y);
+      touchMoveActive = true;
+    }
+  }, { passive: true });
+
+  window.addEventListener('touchend', (ev) => {
+    const now = Date.now();
+    // single-tap click if something intersected
+    if (INTERSECTED && INTERSECTED.userData && INTERSECTED.userData.onClick) {
+      INTERSECTED.userData.onClick();
+      return;
+    }
+    // double-tap toggles menu
+    if (now - lastTap < 300) {
       menuVisible = !menuVisible;
-      
-      // Sichtbarkeit von Menü-Button und Cursor steuern
-      if(menuButtonMesh) menuButtonMesh.visible = menuVisible; 
-      if(cursorMesh) cursorMesh.visible = menuVisible; 
+      menuButtonMesh.visible = menuVisible;
+      cursorMesh.visible = menuVisible;
     }
     lastTap = now;
+    touchMoveActive = false;
+    // reset gaze to center after lifting touch
+    cursorNDC.set(0, 0);
   });
 
-  // Event Listener für FOV Slider
-  fovSlider.addEventListener('input', ()=>{
-    fovScale = fovSlider.value/100;
-    plane.scale.set(fovScale,fovScale,1);
-    let ipd = 0.03*fovScale;
-    cameraLeft.position.x = -ipd/2;
-    cameraRight.position.x = ipd/2;
+  // also support mouse click for debugging in desktop
+  window.addEventListener('click', (ev) => {
+    if (INTERSECTED && INTERSECTED.userData && INTERSECTED.userData.onClick) INTERSECTED.userData.onClick();
   });
 
-  // Event Listener für Fullscreen Button
-  fullscreenBtn.addEventListener('click', ()=>{
-    if(!document.fullscreenElement) document.documentElement.requestFullscreen();
-    else document.exitFullscreen();
-  });
+  window.addEventListener('resize', onWindowResize);
 
-  // Event Listener für Fenstergrößenänderung
-  window.addEventListener('resize', ()=>{
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    cameraLeft.aspect = cameraRight.aspect = window.innerWidth/window.innerHeight;
-    cameraLeft.updateProjectionMatrix();
-    cameraRight.updateProjectionMatrix();
-  });
-
+  // start render loop
   animate();
 }
 
-// --- RENDER-LOOP ---
-function animate(){
+/* helpers */
+
+// set FOV on cameras and update projection matrices
+function updateCameraFOV(fov) {
+  cameraBase.fov = fov;
+  cameraBase.updateProjectionMatrix();
+  cameraLeft.fov = cameraRight.fov = cameraBase.fov;
+  cameraLeft.aspect = cameraRight.aspect = cameraBase.aspect = window.innerWidth / window.innerHeight;
+  cameraLeft.updateProjectionMatrix();
+  cameraRight.updateProjectionMatrix();
+}
+
+// compute plane size so it exactly fills camera frustum at plane distance
+function updateVideoPlane() {
+  const planeDist = 1.5; // distance from cameraBase to place the video plane (match your model depth)
+  const fovRad = THREE.MathUtils.degToRad(cameraBase.fov);
+  const height = 2 * Math.tan(fovRad / 2) * planeDist;
+  const width = height * (video.videoWidth / video.videoHeight || (window.innerWidth/window.innerHeight));
+  videoPlane.scale.set(1,1,1);
+  videoPlane.geometry.dispose();
+  videoPlane.geometry = new THREE.PlaneGeometry(width, height);
+  // position plane in front of camera (world coords relative to cameraBase)
+  const camWorldPos = new THREE.Vector3();
+  cameraBase.getWorldPosition(camWorldPos);
+  const camDir = new THREE.Vector3(0, 0, -1).applyQuaternion(cameraBase.quaternion);
+  const planePos = camWorldPos.clone().add(camDir.clone().multiplyScalar(planeDist));
+  videoPlane.position.copy(planePos);
+  // rotate plane to face cameraBase
+  const lookAtTarget = camWorldPos.clone();
+  videoPlane.lookAt(lookAtTarget);
+}
+
+// keep renderer and camera aspect up to date
+function onWindowResize() {
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  cameraBase.aspect = window.innerWidth / window.innerHeight;
+  cameraLeft.aspect = cameraRight.aspect = cameraBase.aspect;
+  cameraBase.updateProjectionMatrix();
+  cameraLeft.updateProjectionMatrix();
+  cameraRight.updateProjectionMatrix();
+  updateVideoPlane();
+}
+
+/* core render loop */
+function animate() {
   requestAnimationFrame(animate);
-  if(!renderer) return;
+  if (!renderer) return;
 
-  // Raycasting (wird nur ausgeführt, wenn das Menü sichtbar ist)
-  if(menuVisible) { 
-      raycaster.setFromCamera(cursorPosition, cameraLeft); 
-      const intersects = raycaster.intersectObjects(interactiveObjects, false);
-
-      if (intersects.length > 0) {
-        const intersectedObject = intersects[0].object;
-        
-        if (INTERSECTED != intersectedObject) {
-          if (INTERSECTED) {
-            INTERSECTED.material.emissive.setHex(0x000000);
-          }
-          INTERSECTED = intersectedObject;
-          INTERSECTED.material.emissive.setHex(0x303030); // Leuchten bei Hover
-          cursorMesh.scale.set(1.5, 1.5, 1.5); 
-        }
-      } else {
-        if (INTERSECTED) {
-          INTERSECTED.material.emissive.setHex(0x000000);
-          cursorMesh.scale.set(1, 1, 1);
-        }
-        INTERSECTED = null;
-      }
-  } else {
-    // Raycasting deaktiviert, Zustand zurücksetzen
-    if (INTERSECTED) INTERSECTED.material.emissive.setHex(0x000000);
-    INTERSECTED = null;
-  }
-
-  // Video-Textur aktualisieren (wichtig für den Kamera-Feed)
+  // update video texture when ready
   if (video && video.readyState >= video.HAVE_ENOUGH_DATA) {
     if (videoTexture) videoTexture.needsUpdate = true;
   }
 
+  // compute cursor world position (from cameraBase forward direction) and update raycaster NDC
+  // if user moved touch/mouse, cursorNDC changes; otherwise stays center (0,0)
+  // cursor world distance (place cursor slightly in front of menu/button)
+  const cursorDistance = 1.2;
+
+  // compute a 3D point for cursor from camera using NDC or center by default
+  // if using NDC (touch/mouse), we will create a ray from camera and place cursor on that ray at cursorDistance.
+  // otherwise place at camera forward center
+  const ndc = cursorNDC.clone();
+  raycaster.setFromCamera(ndc, cameraLeft);
+  const dir = raycaster.ray.direction.clone();
+  const origin = raycaster.ray.origin.clone();
+  const worldCursorPos = origin.clone().add(dir.multiplyScalar(cursorDistance));
+  cursorMesh.position.copy(worldCursorPos);
+  // make cursor face camera (billboard)
+  cursorMesh.lookAt(cameraLeft.getWorldPosition(new THREE.Vector3()));
+  // scale cursor a bit depending on distance for consistent size
+  const scaleFactor = cursorDistance * 0.02;
+  cursorMesh.scale.set(scaleFactor, scaleFactor, scaleFactor);
+
+  // raycasting against interactiveObjects if menu visible
+  if (menuVisible) {
+    const intersects = raycaster.intersectObjects(interactiveObjects, false);
+    if (intersects.length > 0) {
+      const obj = intersects[0].object;
+      if (INTERSECTED !== obj) {
+        if (INTERSECTED && INTERSECTED.material && 'emissive' in INTERSECTED.material) INTERSECTED.material.emissive.setHex(0x000000);
+        INTERSECTED = obj;
+        if (INTERSECTED && INTERSECTED.material && 'emissive' in INTERSECTED.material) INTERSECTED.material.emissive.setHex(0x303030);
+        cursorMesh.scale.set(scaleFactor*1.6, scaleFactor*1.6, scaleFactor*1.6);
+      }
+    } else {
+      if (INTERSECTED && INTERSECTED.material && 'emissive' in INTERSECTED.material) INTERSECTED.material.emissive.setHex(0x000000);
+      INTERSECTED = null;
+      cursorMesh.scale.set(scaleFactor, scaleFactor, scaleFactor);
+    }
+  } else {
+    if (INTERSECTED && INTERSECTED.material && 'emissive' in INTERSECTED.material) INTERSECTED.material.emissive.setHex(0x000000);
+    INTERSECTED = null;
+  }
+
+  // set IPD scaled by slider (fovScale effect)
+  const fovScale = parseFloat(fovSlider.value) / 100.0;
+  const ipd = baseIPD * fovScale;
+  cameraLeft.position.set(-ipd/2, 0, 0);
+  cameraRight.position.set(ipd/2, 0, 0);
+  cameraLeft.quaternion.copy(cameraBase.quaternion);
+  cameraRight.quaternion.copy(cameraBase.quaternion);
+
+  // render left and right views into halves
   renderer.clear();
-
-  // Linkes Auge rendern
-  renderer.setViewport(0,0,window.innerWidth/2,window.innerHeight);
-  renderer.render(scene,cameraLeft);
-
-  // Rechtes Auge rendern
-  renderer.setViewport(window.innerWidth/2,0,window.innerWidth/2,window.innerHeight);
-  renderer.render(scene,cameraRight);
+  // left
+  renderer.setViewport(0, 0, Math.floor(window.innerWidth / 2), window.innerHeight);
+  renderer.setScissor(0, 0, Math.floor(window.innerWidth / 2), window.innerHeight);
+  renderer.setScissorTest(true);
+  renderer.render(scene, cameraLeft);
+  // right
+  renderer.setViewport(Math.ceil(window.innerWidth / 2), 0, Math.floor(window.innerWidth / 2), window.innerHeight);
+  renderer.setScissor(Math.ceil(window.innerWidth / 2), 0, Math.floor(window.innerWidth / 2), window.innerHeight);
+  renderer.setScissorTest(true);
+  renderer.render(scene, cameraRight);
+  renderer.setScissorTest(false);
 }
+
 </script>
 </body>
 </html>
