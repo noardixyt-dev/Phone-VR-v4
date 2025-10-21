@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Phone VR Viewer</title>
 <style>
+/* Removed the old 2D #menu styles as we are using a 3D mesh now */
 html, body { margin:0; padding:0; overflow:hidden; background:#000; }
-#menu { position:absolute; padding:12px 18px; background:rgba(0,0,0,0.7); border-radius:12px; color:white; font-family:sans-serif; display:none; z-index:10; }
 #fovSlider, #fullscreenBtn { position:absolute; z-index:10; }
 #fovSlider { top:10px; left:10px; width:120px; }
 #fullscreenBtn { top:10px; right:10px; font-size:16px; padding:6px 12px; }
@@ -14,7 +14,6 @@ html, body { margin:0; padding:0; overflow:hidden; background:#000; }
 </style>
 </head>
 <body>
-<div id="menu">VR Menu</div>
 <input type="range" id="fovSlider" min="30" max="120" value="70">
 <button id="fullscreenBtn">Fullscreen</button>
 <button id="startBtn">Tap to Start VR</button>
@@ -23,18 +22,21 @@ html, body { margin:0; padding:0; overflow:hidden; background:#000; }
 <script src="https://cdn.jsdelivr.net/npm/three@0.153.0/examples/js/loaders/GLTFLoader.js"></script>
 <script>
 let renderer, scene, cameraLeft, cameraRight, plane, video, videoTexture;
-let menu = document.getElementById('menu');
 let fovSlider = document.getElementById('fovSlider');
 let fullscreenBtn = document.getElementById('fullscreenBtn');
 let startBtn = document.getElementById('startBtn');
 let fovScale = 0.7;
 let menuVisible = false;
 
-// Menu world position in spherical coordinates
-let menuYaw = 0; // left/right
-let menuPitch = 0; // up/down
-let menuDistance = 1.5; // distance from camera
-let menuScreenPos = {x:0, y:0};
+// --- NEW/UPDATED GLOBALS FOR INTERACTION ---
+let cursorMesh;
+let menuButtonMesh; // Renamed from menuMesh for clarity
+let interactiveObjects = []; // Array to hold all clickable 3D objects
+const raycaster = new THREE.Raycaster();
+const cursorPosition = new THREE.Vector2(0, 0); // Raycaster checks from the center (0, 0)
+let INTERSECTED = null; // Tracks the currently gazed-at object
+// --- END NEW GLOBALS ---
+
 
 startBtn.addEventListener('click', async () => {
   startBtn.style.display = 'none';
@@ -85,31 +87,62 @@ function initThreeJS(){
     model.position.set(0, -0.5, -1.5);
     scene.add(model);
   });
+  
+  // --- NEW: Gaze Cursor Setup ---
+  const cursorGeometry = new THREE.RingGeometry(0.005, 0.01, 32);
+  const cursorMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+  cursorMesh = new THREE.Mesh(cursorGeometry, cursorMaterial);
+  cursorMesh.position.set(0, 0, -1.0); // Fixed position in front of the camera
+  scene.add(cursorMesh);
+  // --- END NEW: Gaze Cursor Setup ---
 
-  // Double-tap menu toggle
+  // --- NEW: World-Locked Menu Button Setup ---
+  const buttonGeometry = new THREE.BoxGeometry(0.4, 0.2, 0.05); // Simple button shape
+  const buttonMaterial = new THREE.MeshBasicMaterial({ color: 0x3333ff }); // Blue button
+  
+  menuButtonMesh = new THREE.Mesh(buttonGeometry, buttonMaterial);
+  menuButtonMesh.position.set(0, -0.2, -1.4); // Positioned in the 3D world
+  menuButtonMesh.rotation.x = Math.PI * -0.1; // Tilt up slightly
+  
+  // Custom property to identify the action
+  menuButtonMesh.userData = { 
+      type: 'button',
+      name: 'Start/Stop',
+      onClick: () => {
+          console.log('Menu Button Clicked! (Action Triggered)');
+          // Example action: change the color
+          menuButtonMesh.material.color.set(Math.random() * 0xffffff); 
+      }
+  };
+  
+  menuButtonMesh.visible = false; // Start hidden
+  scene.add(menuButtonMesh);
+  interactiveObjects.push(menuButtonMesh); // Add to the interactive list
+  // --- END NEW: World-Locked Menu Button Setup ---
+
+  // Double-tap menu toggle AND Gaze-and-Tap Click
   let lastTap = 0;
   window.addEventListener('touchend', e=>{
     const now = Date.now();
+    
+    // --- UPDATED: Check for an interactive click first (single tap) ---
+    if (INTERSECTED) {
+        // A single tap acts as a click on the gazed-at object
+        INTERSECTED.userData.onClick();
+        return; // Consume the tap as a click
+    }
+    // --- END UPDATED ---
+
+    // Original Double-tap logic: toggle menu visibility
     if(now - lastTap < 300){
       menuVisible = !menuVisible;
-      menu.style.display = menuVisible ? 'block' : 'none';
-      if(menuVisible){
-        menuYaw = 0;
-        menuPitch = 0;
-      }
+      // Control the visibility of the 3D mesh
+      if(menuButtonMesh) menuButtonMesh.visible = menuVisible; 
     }
     lastTap = now;
   });
 
-  // Device orientation
-  window.addEventListener('deviceorientation', e=>{
-    if(!menuVisible) return;
-    // In landscape, map roll -> pitch, gamma -> yaw
-    const gamma = e.gamma || 0; // side-to-side
-    const beta = e.beta || 0;   // front-back
-    menuYaw = -gamma;
-    menuPitch = -beta;
-  });
+  // Removed deviceorientation listener as the 3D object tracks correctly now
 
   fovSlider.addEventListener('input', ()=>{
     fovScale = fovSlider.value/100;
@@ -138,15 +171,37 @@ function animate(){
   requestAnimationFrame(animate);
   if(!renderer) return;
 
-  // Menu position calculation (world-anchored)
-  if(menuVisible){
-    const centerX = window.innerWidth/2 - menu.offsetWidth/2;
-    const centerY = window.innerHeight/2 - menu.offsetHeight/2;
-    menuScreenPos.x = centerX + menuYaw*window.innerWidth/4;
-    menuScreenPos.y = centerY + menuPitch*window.innerHeight/4;
-    menu.style.left = `${menuScreenPos.x}px`;
-    menu.style.top = `${menuScreenPos.y}px`;
+  // --- NEW: Raycasting Logic for Gaze Interaction ---
+  // 1. Set the raycaster to shoot from the camera's center
+  raycaster.setFromCamera(cursorPosition, cameraLeft); 
+  
+  // 2. Check for intersections with interactive objects
+  const intersects = raycaster.intersectObjects(interactiveObjects, false);
+
+  if (intersects.length > 0) {
+    // There is an intersection
+    const intersectedObject = intersects[0].object;
+    
+    if (INTERSECTED != intersectedObject) {
+      // New object intersected - restore old object color
+      if (INTERSECTED) {
+        INTERSECTED.material.emissive.setHex(0x000000);
+      }
+      // Highlight the new object
+      INTERSECTED = intersectedObject;
+      INTERSECTED.material.emissive.setHex(0x303030); // Slight highlight on hover
+      cursorMesh.scale.set(1.5, 1.5, 1.5); // Cursor gets slightly bigger
+    }
+  } else {
+    // No intersection
+    if (INTERSECTED) {
+      // Restore the color of the object we just looked away from
+      INTERSECTED.material.emissive.setHex(0x000000);
+      cursorMesh.scale.set(1, 1, 1);
+    }
+    INTERSECTED = null;
   }
+  // --- END NEW: Raycasting Logic ---
 
   renderer.clear();
 
