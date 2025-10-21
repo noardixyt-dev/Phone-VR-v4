@@ -5,12 +5,18 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Phone VR Viewer</title>
 <style>
+/* Basiseinstellungen */
 html, body { margin:0; padding:0; overflow:hidden; background:#000; }
+
+/* Steuerelemente (werden nach dem Start sichtbar) */
 #fovSlider, #fullscreenBtn { position:absolute; z-index:10; }
 #fovSlider { top:10px; left:10px; width:120px; }
 #fullscreenBtn { top:10px; right:10px; font-size:16px; padding:6px 12px; }
+
+/* Start-Button */
 #startBtn { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); padding:15px 25px; font-size:18px; border-radius:12px; background:#333; color:white; z-index:20; }
-/* Ensure the controls are hidden until we start */
+
+/* Steuerelemente zu Beginn verstecken */
 #fovSlider, #fullscreenBtn { display: none; } 
 </style>
 </head>
@@ -29,18 +35,18 @@ let startBtn = document.getElementById('startBtn');
 let fovScale = 0.7;
 let menuVisible = false;
 
-// --- GLOBALS FOR INTERACTION ---
+// Globale Variablen für Interaktion und 3D-Objekte
 let cursorMesh;
 let menuButtonMesh; 
 let interactiveObjects = []; 
 const raycaster = new THREE.Raycaster();
-const cursorPosition = new THREE.Vector2(0, 0); 
+const cursorPosition = new THREE.Vector2(0, 0); // Raycast-Ursprung ist die Mitte des Bildschirms
 let INTERSECTED = null; 
-// --- END GLOBALS ---
 
 
+// --- START: INITIALISIERUNG DES VR-VIEWERS ---
 startBtn.addEventListener('click', async () => {
-  // Request fullscreen and camera access at the same time for better compatibility
+  // Fullscreen und Steuerelemente anzeigen
   if(document.documentElement.requestFullscreen) {
     document.documentElement.requestFullscreen();
   }
@@ -49,31 +55,36 @@ startBtn.addEventListener('click', async () => {
   fullscreenBtn.style.display = 'block';
   fovSlider.style.display = 'block';
 
+  // Video-Element für den Kamerastream
   video = document.createElement('video');
   video.autoplay = true;
   video.playsInline = true;
   video.muted = true;
-  video.style.display = 'none'; // Keep the raw video element hidden
+  video.style.display = 'none'; 
   document.body.appendChild(video);
 
   try {
-    // Request 'environment' camera for the back camera
-    const stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment' }, audio:false });
+    // Kamerazugriff anfordern (Umgebungskamera)
+    const stream = await navigator.mediaDevices.getUserMedia({ 
+        video:{ facingMode:'environment' }, audio:false 
+    });
     video.srcObject = stream;
     
-    // Crucial: Wait for the video to load metadata and start playing
+    // Warten, bis der Stream geladen ist und mit der Wiedergabe beginnen
     video.addEventListener('loadedmetadata', async () => {
         await video.play();
         initThreeJS();
     }, { once: true });
     
   } catch(e){
-    alert('Camera access denied or not supported. Error: ' + e.message);
+    alert('Kamerazugriff verweigert oder nicht unterstützt. Fehler: ' + e.message);
     startBtn.style.display = 'block';
   }
 });
 
+
 function initThreeJS(){
+  // Renderer
   renderer = new THREE.WebGLRenderer({antialias:true});
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.autoClear = true;
@@ -81,14 +92,14 @@ function initThreeJS(){
 
   scene = new THREE.Scene();
 
-  // Basic camera setup
+  // Kameras (Links & Rechts)
   cameraLeft = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 1000);
   cameraRight = cameraLeft.clone();
   let baseIPD = 0.03;
   cameraLeft.position.x = -baseIPD/2;
   cameraRight.position.x = baseIPD/2;
 
-  // Video Texture (Camera Output)
+  // Video-Hintergrund (Kamera-Feed)
   videoTexture = new THREE.VideoTexture(video);
   videoTexture.minFilter = THREE.LinearFilter;
   videoTexture.magFilter = THREE.LinearFilter;
@@ -101,7 +112,7 @@ function initThreeJS(){
   plane.position.z = -2;
   scene.add(plane);
 
-  // Example AR model
+  // Beispiel AR-Modell (Helm)
   const loader = new THREE.GLTFLoader();
   loader.load('https://threejs.org/examples/models/gltf/DamagedHelmet/glTF/DamagedHelmet.gltf', gltf=>{
     const model = gltf.scene;
@@ -113,55 +124,55 @@ function initThreeJS(){
   const cursorGeometry = new THREE.RingGeometry(0.005, 0.01, 32);
   const cursorMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
   cursorMesh = new THREE.Mesh(cursorGeometry, cursorMaterial);
-  cursorMesh.position.set(0, 0, -1.0); // Fixed position in front of the camera
-  cursorMesh.visible = false; // <<< CHANGE: START HIDDEN
+  cursorMesh.position.set(0, 0, -1.0); // Fixe Position vor der Kamera
+  cursorMesh.visible = false; // Startet versteckt
   scene.add(cursorMesh);
-  // --- END Gaze Cursor Setup ---
-
+  
   // --- World-Locked Menu Button Setup ---
   const buttonGeometry = new THREE.BoxGeometry(0.4, 0.2, 0.05);
   const buttonMaterial = new THREE.MeshBasicMaterial({ color: 0x3333ff });
   
   menuButtonMesh = new THREE.Mesh(buttonGeometry, buttonMaterial);
-  menuButtonMesh.position.set(0, -0.2, -1.4);
-  menuButtonMesh.rotation.x = Math.PI * -0.1; 
+  menuButtonMesh.position.set(0, -0.2, -1.4); // Position im 3D-Raum
+  menuButtonMesh.rotation.x = Math.PI * -0.1; // Leichte Neigung
   
+  // Klick-Aktion des Buttons
   menuButtonMesh.userData = { 
       type: 'button',
-      name: 'Start/Stop',
+      name: 'Test Button',
       onClick: () => {
-          console.log('Menu Button Clicked! (Action Triggered)');
-          menuButtonMesh.material.color.set(Math.random() * 0xffffff); 
+          console.log('Button geklickt!');
+          menuButtonMesh.material.color.set(Math.random() * 0xffffff); // Beispiel: Farbe ändern
       }
   };
   
-  menuButtonMesh.visible = false; 
+  menuButtonMesh.visible = false; // Startet versteckt
   scene.add(menuButtonMesh);
-  interactiveObjects.push(menuButtonMesh); 
-  // --- END World-Locked Menu Button Setup ---
+  interactiveObjects.push(menuButtonMesh); // Button zur interaktiven Liste hinzufügen
 
-  // Double-tap menu toggle AND Gaze-and-Tap Click
+  // --- Double-Tap für Menü-Toggle & Single-Tap für Klick ---
   let lastTap = 0;
   window.addEventListener('touchend', e=>{
     const now = Date.now();
     
-    // Check for an interactive click first (single tap)
+    // 1. Gaze-Klick-Logik (Single Tap)
     if (INTERSECTED) {
         INTERSECTED.userData.onClick();
-        return; 
+        return; // Klick wurde ausgeführt, Menü-Toggle überspringen
     }
 
-    // Original Double-tap logic: toggle menu visibility
+    // 2. Menü-Toggle-Logik (Double Tap)
     if(now - lastTap < 300){
       menuVisible = !menuVisible;
       
-      // <<< CHANGE: Update visibility for both menu and cursor
+      // Sichtbarkeit von Menü-Button und Cursor steuern
       if(menuButtonMesh) menuButtonMesh.visible = menuVisible; 
       if(cursorMesh) cursorMesh.visible = menuVisible; 
     }
     lastTap = now;
   });
 
+  // Event Listener für FOV Slider
   fovSlider.addEventListener('input', ()=>{
     fovScale = fovSlider.value/100;
     plane.scale.set(fovScale,fovScale,1);
@@ -170,11 +181,13 @@ function initThreeJS(){
     cameraRight.position.x = ipd/2;
   });
 
+  // Event Listener für Fullscreen Button
   fullscreenBtn.addEventListener('click', ()=>{
     if(!document.fullscreenElement) document.documentElement.requestFullscreen();
     else document.exitFullscreen();
   });
 
+  // Event Listener für Fenstergrößenänderung
   window.addEventListener('resize', ()=>{
     renderer.setSize(window.innerWidth, window.innerHeight);
     cameraLeft.aspect = cameraRight.aspect = window.innerWidth/window.innerHeight;
@@ -185,12 +198,15 @@ function initThreeJS(){
   animate();
 }
 
+// --- ENDE: INITIALISIERUNG DES VR-VIEWERS ---
+
+// --- RENDER-LOOP ---
 function animate(){
   requestAnimationFrame(animate);
   if(!renderer) return;
 
-  // --- Raycasting Logic for Gaze Interaction ---
-  if(menuVisible) { // <<< CHANGE: ONLY CHECK FOR INTERSECTIONS WHEN MENU IS ON
+  // Raycasting (wird nur ausgeführt, wenn das Menü sichtbar ist)
+  if(menuVisible) { 
       raycaster.setFromCamera(cursorPosition, cameraLeft); 
       const intersects = raycaster.intersectObjects(interactiveObjects, false);
 
@@ -198,14 +214,16 @@ function animate(){
         const intersectedObject = intersects[0].object;
         
         if (INTERSECTED != intersectedObject) {
+          // Highlight-Effekt: Altes Objekt zurücksetzen, neues hervorheben
           if (INTERSECTED) {
             INTERSECTED.material.emissive.setHex(0x000000);
           }
           INTERSECTED = intersectedObject;
-          INTERSECTED.material.emissive.setHex(0x303030); 
-          cursorMesh.scale.set(1.5, 1.5, 1.5); 
+          INTERSECTED.material.emissive.setHex(0x303030); // Leuchten bei Hover
+          cursorMesh.scale.set(1.5, 1.5, 1.5); // Cursor wird größer
         }
       } else {
+        // Kein Schnittpunkt
         if (INTERSECTED) {
           INTERSECTED.material.emissive.setHex(0x000000);
           cursorMesh.scale.set(1, 1, 1);
@@ -213,24 +231,23 @@ function animate(){
         INTERSECTED = null;
       }
   } else {
-    // Reset intersection when menu is hidden
+    // Raycasting deaktiviert, Zustand zurücksetzen
     if (INTERSECTED) INTERSECTED.material.emissive.setHex(0x000000);
     INTERSECTED = null;
   }
-  // --- END Raycasting Logic ---
 
-  // The video texture needs to be updated continuously
+  // Video-Textur aktualisieren (wichtig für den Kamera-Feed)
   if (video && video.readyState >= video.HAVE_ENOUGH_DATA) {
     if (videoTexture) videoTexture.needsUpdate = true;
   }
 
   renderer.clear();
 
-  // Left eye
+  // Linkes Auge rendern
   renderer.setViewport(0,0,window.innerWidth/2,window.innerHeight);
   renderer.render(scene,cameraLeft);
 
-  // Right eye
+  // Rechtes Auge rendern
   renderer.setViewport(window.innerWidth/2,0,window.innerWidth/2,window.innerHeight);
   renderer.render(scene,cameraRight);
 }
