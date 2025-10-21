@@ -40,13 +40,13 @@ let cursorMesh;
 let menuButtonMesh; 
 let interactiveObjects = []; 
 const raycaster = new THREE.Raycaster();
-const cursorPosition = new THREE.Vector2(0, 0); // Raycast-Ursprung ist die Mitte des Bildschirms
+const cursorPosition = new THREE.Vector2(0, 0); 
 let INTERSECTED = null; 
 
 
 // --- START: INITIALISIERUNG DES VR-VIEWERS ---
 startBtn.addEventListener('click', async () => {
-  // Fullscreen und Steuerelemente anzeigen
+  // 1. Fullscreen anfordern (muss durch Benutzer-Tap ausgelöst werden)
   if(document.documentElement.requestFullscreen) {
     document.documentElement.requestFullscreen();
   }
@@ -55,7 +55,7 @@ startBtn.addEventListener('click', async () => {
   fullscreenBtn.style.display = 'block';
   fovSlider.style.display = 'block';
 
-  // Video-Element für den Kamerastream
+  // Video-Element für den Kamerastream erstellen
   video = document.createElement('video');
   video.autoplay = true;
   video.playsInline = true;
@@ -64,16 +64,16 @@ startBtn.addEventListener('click', async () => {
   document.body.appendChild(video);
 
   try {
-    // Kamerazugriff anfordern (Umgebungskamera)
+    // 2. Kamerazugriff anfordern
     const stream = await navigator.mediaDevices.getUserMedia({ 
         video:{ facingMode:'environment' }, audio:false 
     });
     video.srcObject = stream;
     
-    // Warten, bis der Stream geladen ist und mit der Wiedergabe beginnen
+    // 3. Warten, bis das Video geladen und spielbereit ist
     video.addEventListener('loadedmetadata', async () => {
         await video.play();
-        initThreeJS();
+        initThreeJS(); // Three.js erst jetzt starten
     }, { once: true });
     
   } catch(e){
@@ -124,8 +124,8 @@ function initThreeJS(){
   const cursorGeometry = new THREE.RingGeometry(0.005, 0.01, 32);
   const cursorMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
   cursorMesh = new THREE.Mesh(cursorGeometry, cursorMaterial);
-  cursorMesh.position.set(0, 0, -1.0); // Fixe Position vor der Kamera
-  cursorMesh.visible = false; // Startet versteckt
+  cursorMesh.position.set(0, 0, -1.0); 
+  cursorMesh.visible = false; 
   scene.add(cursorMesh);
   
   // --- World-Locked Menu Button Setup ---
@@ -133,8 +133,8 @@ function initThreeJS(){
   const buttonMaterial = new THREE.MeshBasicMaterial({ color: 0x3333ff });
   
   menuButtonMesh = new THREE.Mesh(buttonGeometry, buttonMaterial);
-  menuButtonMesh.position.set(0, -0.2, -1.4); // Position im 3D-Raum
-  menuButtonMesh.rotation.x = Math.PI * -0.1; // Leichte Neigung
+  menuButtonMesh.position.set(0, -0.2, -1.4); 
+  menuButtonMesh.rotation.x = Math.PI * -0.1; 
   
   // Klick-Aktion des Buttons
   menuButtonMesh.userData = { 
@@ -142,13 +142,13 @@ function initThreeJS(){
       name: 'Test Button',
       onClick: () => {
           console.log('Button geklickt!');
-          menuButtonMesh.material.color.set(Math.random() * 0xffffff); // Beispiel: Farbe ändern
+          menuButtonMesh.material.color.set(Math.random() * 0xffffff); 
       }
   };
   
-  menuButtonMesh.visible = false; // Startet versteckt
+  menuButtonMesh.visible = false; 
   scene.add(menuButtonMesh);
-  interactiveObjects.push(menuButtonMesh); // Button zur interaktiven Liste hinzufügen
+  interactiveObjects.push(menuButtonMesh); 
 
   // --- Double-Tap für Menü-Toggle & Single-Tap für Klick ---
   let lastTap = 0;
@@ -158,7 +158,7 @@ function initThreeJS(){
     // 1. Gaze-Klick-Logik (Single Tap)
     if (INTERSECTED) {
         INTERSECTED.userData.onClick();
-        return; // Klick wurde ausgeführt, Menü-Toggle überspringen
+        return; 
     }
 
     // 2. Menü-Toggle-Logik (Double Tap)
@@ -198,8 +198,6 @@ function initThreeJS(){
   animate();
 }
 
-// --- ENDE: INITIALISIERUNG DES VR-VIEWERS ---
-
 // --- RENDER-LOOP ---
 function animate(){
   requestAnimationFrame(animate);
@@ -214,16 +212,14 @@ function animate(){
         const intersectedObject = intersects[0].object;
         
         if (INTERSECTED != intersectedObject) {
-          // Highlight-Effekt: Altes Objekt zurücksetzen, neues hervorheben
           if (INTERSECTED) {
             INTERSECTED.material.emissive.setHex(0x000000);
           }
           INTERSECTED = intersectedObject;
           INTERSECTED.material.emissive.setHex(0x303030); // Leuchten bei Hover
-          cursorMesh.scale.set(1.5, 1.5, 1.5); // Cursor wird größer
+          cursorMesh.scale.set(1.5, 1.5, 1.5); 
         }
       } else {
-        // Kein Schnittpunkt
         if (INTERSECTED) {
           INTERSECTED.material.emissive.setHex(0x000000);
           cursorMesh.scale.set(1, 1, 1);
