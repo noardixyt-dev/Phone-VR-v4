@@ -2,19 +2,59 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover" />
-  <title>Phone VR Viewer — improved</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover,user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="VR Viewer" />
+  <title>Phone VR Viewer By Noardix</title>
   <style>
     html, body {
       margin: 0;
       padding: 0;
-      height: 100%;
-      width: 100%;
+      height: 100vh;
+      width: 100vw;
       overflow: hidden;
       background: #000;
       color: #fff;
       font-family: system-ui, Segoe UI, Roboto, Helvetica, Arial;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-touch-callout: none;
     }
+
+    #landscapeWarning {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+      flex-direction: column;
+      gap: 20px;
+      text-align: center;
+      padding: 20px;
+    }
+
+    #landscapeWarning.hidden {
+      display: none;
+    }
+
+    #landscapeWarning h1 {
+      font-size: 24px;
+      margin: 0;
+    }
+
+    #landscapeWarning p {
+      font-size: 16px;
+      opacity: 0.8;
+      margin: 0;
+    }
+
     #controls {
       position: absolute;
       z-index: 30;
@@ -24,16 +64,21 @@
       gap: 10px;
       align-items: center;
     }
+
     .control {
-      background: rgba(0, 0, 0, 0.4);
+      background: rgba(0, 0, 0, 0.5);
       backdrop-filter: blur(6px);
-      padding: 8px;
+      padding: 8px 12px;
       border-radius: 8px;
-      font-size: 13px;
+      font-size: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
     }
+
     #fovSlider, #eyeAspectSlider {
-      width: 160px;
+      width: 120px;
+      vertical-align: middle;
     }
+
     #fullscreenBtn {
       position: absolute;
       top: 10px;
@@ -42,10 +87,12 @@
       padding: 8px 12px;
       border-radius: 8px;
       background: rgba(255, 255, 255, 0.06);
-      border: 1px solid rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.1);
       color: #fff;
-      font-size: 14px;
+      font-size: 12px;
+      cursor: pointer;
     }
+
     #startBtn {
       position: absolute;
       top: 50%;
@@ -53,66 +100,119 @@
       transform: translate(-50%, -50%);
       padding: 14px 20px;
       border-radius: 10px;
-      background: #111;
+      background: rgba(17, 17, 17, 0.95);
       color: #fff;
       z-index: 40;
-      border: 1px solid rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.1);
       font-size: 16px;
+      cursor: pointer;
     }
+
     #labelSmall {
-      font-size: 12px;
+      font-size: 11px;
       opacity: 0.9;
+      margin-bottom: 4px;
     }
+
     #hint {
       position: absolute;
       left: 50%;
       bottom: 12px;
       transform: translateX(-50%);
-      font-size: 12px;
-      opacity: 0.7;
+      font-size: 11px;
+      opacity: 0.6;
       padding: 6px 10px;
       border-radius: 8px;
-      background: rgba(0, 0, 0, 0.35);
+      background: rgba(0, 0, 0, 0.5);
       z-index: 20;
     }
+
     video {
       display: none !important;
+    }
+
+    #gyroStatus {
+      position: absolute;
+      bottom: 50px;
+      left: 12px;
+      z-index: 25;
+      font-size: 11px;
+      opacity: 0.6;
+      background: rgba(0, 0, 0, 0.4);
+      padding: 6px 10px;
+      border-radius: 6px;
     }
   </style>
 </head>
 <body>
-  <div id="controls" aria-hidden="true" style="display:none">
+  <div id="landscapeWarning">
+    <h1>📱 Rotate to Landscape</h1>
+    <p>This VR viewer requires landscape orientation</p>
+  </div>
+
+  <div id="controls" style="display:none">
     <div class="control">
-      <div id="labelSmall">Camera FOV <span id="fovVal">70°</span></div>
+      <div id="labelSmall">FOV <span id="fovVal">70°</span></div>
       <input id="fovSlider" type="range" min="30" max="120" value="70" />
     </div>
     <div class="control">
-      <div id="labelSmall">Eye width:height <span id="eyeAspectVal">1.50</span></div>
+      <div id="labelSmall">Eye Ratio <span id="eyeAspectVal">1.50</span></div>
       <input id="eyeAspectSlider" type="range" min="100" max="180" value="150" />
     </div>
   </div>
+
   <button id="fullscreenBtn" style="display:none">Fullscreen</button>
   <button id="startBtn">Tap to Start VR</button>
-  <div id="hint">Double-tap to toggle menu • Drag to move cursor • Tap objects to click</div>
+  <div id="hint">Double-tap to toggle menu • Gyro tracks head</div>
+  <div id="gyroStatus">Gyro: Waiting...</div>
 
   <script src="https://cdn.jsdelivr.net/npm/three@0.153.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.153.0/examples/js/loaders/GLTFLoader.js"></script>
+
   <script>
-    /* UI elements */
+    /* ========== LANDSCAPE ORIENTATION CHECK ========== */
+    const landscapeWarning = document.getElementById('landscapeWarning');
+    const controls = document.getElementById('controls');
+    const hint = document.getElementById('hint');
+    const startBtn = document.getElementById('startBtn');
+    const gyroStatus = document.getElementById('gyroStatus');
+
+    function checkOrientation() {
+      const isLandscape = window.innerWidth > window.innerHeight;
+      if (!isLandscape) {
+        landscapeWarning.classList.remove('hidden');
+        controls.style.display = 'none';
+        hint.style.display = 'none';
+        startBtn.style.display = 'none';
+        gyroStatus.style.display = 'none';
+      } else {
+        landscapeWarning.classList.add('hidden');
+        if (renderer) {
+          controls.style.display = 'flex';
+          hint.style.display = 'block';
+          gyroStatus.style.display = 'block';
+        }
+      }
+    }
+
+    window.addEventListener('orientationchange', checkOrientation);
+    window.addEventListener('resize', checkOrientation);
+    checkOrientation();
+
+    /* ========== UI ELEMENTS ========== */
     const fovSlider = document.getElementById('fovSlider');
     const fovVal = document.getElementById('fovVal');
     const eyeAspectSlider = document.getElementById('eyeAspectSlider');
     const eyeAspectVal = document.getElementById('eyeAspectVal');
     const fullscreenBtn = document.getElementById('fullscreenBtn');
-    const startBtn = document.getElementById('startBtn');
-    const controls = document.getElementById('controls');
 
+    /* ========== THREE.JS VARIABLES ========== */
     let renderer, scene, cameraBase, cameraLeft, cameraRight;
     let video, videoTexture, videoPlane;
     let cursorMesh, menuPanelGroup;
     let interactiveObjects = [];
+
     const raycaster = new THREE.Raycaster();
-    const pointerNDC = new THREE.Vector2(0, 0);
     let INTERSECTED = null;
     let menuVisible = false;
     let lastTap = 0;
@@ -122,31 +222,82 @@
     let eyeAspect = parseFloat(eyeAspectSlider.value) / 100.0;
     const planeDist = 1.5;
 
-    /* PATCH: Track orientation changes */
-    let currentOrientation = 'portrait';
-    let isLandscape = window.innerWidth > window.innerHeight;
+    /* ========== GYROSCOPE TRACKING ========== */
+    let deviceOrientation = { alpha: 0, beta: 0, gamma: 0 };
+    let gyroAvailable = false;
+    let gyroPermissionGranted = false;
 
-    /* Start / camera access */
+    async function requestGyroPermission() {
+      if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+        try {
+          const permission = await DeviceOrientationEvent.requestPermission();
+          if (permission === 'granted') {
+            gyroPermissionGranted = true;
+            initDeviceOrientation();
+            gyroStatus.textContent = 'Gyro: Active';
+          } else {
+            gyroStatus.textContent = 'Gyro: Denied';
+          }
+        } catch (error) {
+          console.error('Gyro permission error:', error);
+          gyroStatus.textContent = 'Gyro: Error';
+        }
+      } else {
+        // Non-iOS or older devices
+        initDeviceOrientation();
+        gyroStatus.textContent = 'Gyro: Legacy Mode';
+      }
+    }
+
+    function initDeviceOrientation() {
+      window.addEventListener('deviceorientation', (event) => {
+        deviceOrientation.alpha = THREE.MathUtils.degToRad(event.alpha || 0);
+        deviceOrientation.beta = THREE.MathUtils.degToRad(event.beta || 0);
+        deviceOrientation.gamma = THREE.MathUtils.degToRad(event.gamma || 0);
+        gyroAvailable = true;
+      });
+    }
+
+    function applyGyroRotation() {
+      if (!gyroAvailable || !cameraBase) return;
+
+      // Create Euler rotation from device orientation
+      // Alpha: Z axis (yaw)
+      // Beta: X axis (pitch)
+      // Gamma: Y axis (roll)
+      const euler = new THREE.Euler(
+        deviceOrientation.beta,
+        deviceOrientation.alpha,
+        -deviceOrientation.gamma,
+        'YXZ'
+      );
+
+      cameraBase.quaternion.setFromEuler(euler);
+    }
+
+    /* ========== START VR ========== */
     startBtn.addEventListener('click', async () => {
+      if (!(window.innerWidth > window.innerHeight)) {
+        alert('Please rotate to landscape');
+        return;
+      }
+
       try {
         if (document.documentElement.requestFullscreen) {
-          await document.documentElement.requestFullscreen();
+          await document.documentElement.requestFullscreen().catch(e => console.log('Fullscreen denied'));
         }
       } catch (e) { /* ignore */ }
 
       startBtn.style.display = 'none';
       fullscreenBtn.style.display = 'block';
       controls.style.display = 'flex';
+      gyroStatus.style.display = 'block';
 
-      /* PATCH: Create video element with explicit attributes */
       video = document.createElement('video');
       video.setAttribute('playsinline', '');
       video.setAttribute('webkit-playsinline', '');
       video.autoplay = true;
       video.muted = true;
-      video.style.width = '100%';
-      video.style.height = '100%';
-      video.style.objectFit = 'cover';
       document.body.appendChild(video);
 
       try {
@@ -157,35 +308,31 @@
         video.srcObject = stream;
 
         video.addEventListener('loadedmetadata', async () => {
-          console.log('Video metadata loaded. Dimensions:', video.videoWidth, 'x', video.videoHeight);
+          console.log('Video loaded:', video.videoWidth, 'x', video.videoHeight);
           try {
             await video.play();
-            console.log('Video playback started');
           } catch (e) {
-            console.warn('video.play blocked', e);
+            console.warn('Play blocked:', e);
           }
           initThreeJS();
+          await requestGyroPermission();
         }, { once: true });
-
-        video.addEventListener('playing', () => {
-          console.log('Video is now playing');
-        });
       } catch (err) {
-        alert('Camera access denied or not available: ' + (err && err.message ? err.message : err));
+        alert('Camera access denied: ' + (err.message || err));
         startBtn.style.display = 'block';
       }
     });
 
-    /* Fullscreen toggle */
+    /* ========== FULLSCREEN TOGGLE ========== */
     fullscreenBtn.addEventListener('click', () => {
       if (!document.fullscreenElement) {
-        document.documentElement.requestFullscreen();
+        document.documentElement.requestFullscreen().catch(e => console.log('Fullscreen denied'));
       } else {
         document.exitFullscreen();
       }
     });
 
-    /* UI updates */
+    /* ========== FOV & EYE ASPECT CONTROLS ========== */
     fovSlider.addEventListener('input', () => {
       cameraFov = parseFloat(fovSlider.value);
       fovVal.textContent = Math.round(cameraFov) + '°';
@@ -205,16 +352,7 @@
       if (cameraLeft) onWindowResize();
     });
 
-    /* PATCH: Handle orientation changes */
-    window.addEventListener('orientationchange', () => {
-      setTimeout(() => {
-        isLandscape = window.innerWidth > window.innerHeight;
-        console.log('Orientation changed. Landscape:', isLandscape);
-        onWindowResize();
-      }, 100);
-    });
-
-    /* ThreeJS init */
+    /* ========== THREE.JS INITIALIZATION ========== */
     function initThreeJS() {
       renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
       renderer.setPixelRatio(window.devicePixelRatio || 1);
@@ -224,25 +362,30 @@
       document.body.appendChild(renderer.domElement);
 
       scene = new THREE.Scene();
-      cameraBase = new THREE.PerspectiveCamera(cameraFov, window.innerWidth / window.innerHeight, 0.01, 1000);
+
+      cameraBase = new THREE.PerspectiveCamera(
+        cameraFov,
+        window.innerWidth / window.innerHeight,
+        0.01,
+        1000
+      );
       cameraBase.position.set(0, 0, 0);
+
       cameraLeft = cameraBase.clone();
       cameraRight = cameraBase.clone();
 
-      /* Lighting */
+      /* LIGHTING */
       scene.add(new THREE.AmbientLight(0xffffff, 0.8));
       const dir = new THREE.DirectionalLight(0xffffff, 0.5);
       dir.position.set(1, 2, 2);
       scene.add(dir);
 
-      /* PATCH: Create video texture with proper settings */
+      /* VIDEO TEXTURE & PLANE */
       videoTexture = new THREE.VideoTexture(video);
       videoTexture.minFilter = THREE.LinearFilter;
       videoTexture.magFilter = THREE.LinearFilter;
       videoTexture.format = THREE.RGBAFormat;
-      videoTexture.colorSpace = THREE.SRGBColorSpace;
 
-      /* PATCH: Create material with double-sided rendering */
       const mat = new THREE.MeshBasicMaterial({
         map: videoTexture,
         toneMapped: false,
@@ -253,16 +396,14 @@
       videoPlane = new THREE.Mesh(geom, mat);
       videoPlane.position.set(0, 0, -planeDist);
       scene.add(videoPlane);
+      console.log('Video plane added to scene');
 
-      console.log('Video plane created and added to scene');
-
-      /* Menu panel group (world-tracked) */
+      /* MENU PANEL GROUP (WORLD-LOCKED) */
       menuPanelGroup = new THREE.Group();
-      menuPanelGroup.position.set(0, -0.3, -1.5);
+      menuPanelGroup.position.set(0, -0.3, -1.5); // Fixed world position
       menuPanelGroup.visible = false;
       scene.add(menuPanelGroup);
 
-      /* Menu background panel */
       const panelGeom = new THREE.PlaneGeometry(0.8, 0.5);
       const panelMat = new THREE.MeshStandardMaterial({
         color: 0x1a1a2e,
@@ -271,13 +412,14 @@
         metalness: 0.1
       });
       const panelMesh = new THREE.Mesh(panelGeom, panelMat);
+      panelMesh.position.z = 0.02;
       menuPanelGroup.add(panelMesh);
 
-      /* Menu buttons */
+      /* MENU BUTTONS */
       const buttonConfigs = [
-        { label: 'Settings', pos: [-0.25, 0.15, 0.01], color: 0x2f7fff },
-        { label: 'Info', pos: [0, 0.15, 0.01], color: 0x7f2fff },
-        { label: 'Close', pos: [0.25, 0.15, 0.01], color: 0xff2f7f }
+        { label: 'Settings', pos: [-0.25, 0.15, 0.03], color: 0x2f7fff },
+        { label: 'Info', pos: [0, 0.15, 0.03], color: 0x7f2fff },
+        { label: 'Close', pos: [0.25, 0.15, 0.03], color: 0xff2f7f }
       ];
 
       buttonConfigs.forEach((config) => {
@@ -306,7 +448,7 @@
         interactiveObjects.push(btnMesh);
       });
 
-      /* Cursor */
+      /* CURSOR */
       const cursorGeo = new THREE.RingGeometry(0.01, 0.02, 24);
       const cursorMat = new THREE.MeshBasicMaterial({
         color: 0xffffff,
@@ -318,25 +460,11 @@
 
       updateVideoPlane();
       onWindowResize();
+
       window.addEventListener('resize', onWindowResize);
 
-      /* Pointer interactions */
-      let pointerActive = false;
-      window.addEventListener('pointermove', (ev) => {
-        /* PATCH: Orientation-aware pointer mapping */
-        let x, y;
-        if (isLandscape) {
-          x = (ev.clientX / window.innerWidth) * 2 - 1;
-          y = -(ev.clientY / window.innerHeight) * 2 + 1;
-        } else {
-          x = (ev.clientX / window.innerWidth) * 2 - 1;
-          y = -(ev.clientY / window.innerHeight) * 2 + 1;
-        }
-        pointerNDC.set(x, y);
-        pointerActive = true;
-      }, { passive: true });
-
-      window.addEventListener('pointerdown', (ev) => {
+      /* DOUBLE-TAP FOR MENU */
+      document.addEventListener('pointerdown', (ev) => {
         const now = Date.now();
         if (now - lastTap < 300) {
           menuVisible = !menuVisible;
@@ -347,9 +475,14 @@
         lastTap = now;
       });
 
-      window.addEventListener('click', (ev) => {
-        updateRaycasterFromNDC(pointerNDC, cameraLeft);
+      /* MENU INTERACTION (CENTER GAZE) */
+      document.addEventListener('click', (ev) => {
+        if (!menuVisible) return;
+
+        // Raycast from center of screen (0, 0 NDC)
+        raycaster.setFromCamera(new THREE.Vector2(0, 0), cameraLeft);
         const intersects = raycaster.intersectObjects(menuPanelGroup.children, true);
+
         if (intersects.length > 0 && intersects[0].object.userData && typeof intersects[0].object.userData.onClick === 'function') {
           intersects[0].object.userData.onClick();
         }
@@ -358,12 +491,9 @@
       animate();
     }
 
-    /* Update video plane size */
+    /* ========== UPDATE VIDEO PLANE ========== */
     function updateVideoPlane() {
-      if (!video || !video.videoWidth) {
-        console.log('Video not ready yet');
-        return;
-      }
+      if (!video || !video.videoWidth) return;
 
       const fovRad = THREE.MathUtils.degToRad(cameraBase.fov);
       const height = 2 * Math.tan(fovRad / 2) * planeDist;
@@ -372,26 +502,18 @@
 
       videoPlane.geometry.dispose();
       videoPlane.geometry = new THREE.PlaneGeometry(width, height);
-
-      console.log('Video plane updated. Size:', width.toFixed(2), 'x', height.toFixed(2), 'Aspect:', videoAspect.toFixed(2));
     }
 
-    /* Raycaster from NDC */
-    function updateRaycasterFromNDC(ndc, cam) {
-      raycaster.setFromCamera(ndc, cam);
-    }
-
-    /* Viewport computation */
+    /* ========== VIEWPORT COMPUTATION ========== */
     let cachedView = { leftX: 0, leftW: 0, rightX: 0, rightW: 0, eyeW: 0, eyeH: 0 };
 
     function computeViewports() {
       let eyeH = window.innerHeight;
       let eyeW = Math.round(eyeH * eyeAspect);
       let totalW = eyeW * 2;
-      let scale = 1;
 
       if (totalW > window.innerWidth) {
-        scale = window.innerWidth / totalW;
+        const scale = window.innerWidth / totalW;
         eyeW = Math.floor(eyeW * scale);
         eyeH = Math.floor(eyeH * scale);
         totalW = eyeW * 2;
@@ -404,15 +526,13 @@
       return cachedView;
     }
 
-    /* Handle window resize */
+    /* ========== WINDOW RESIZE ========== */
     function onWindowResize() {
       if (!renderer) return;
 
-      isLandscape = window.innerWidth > window.innerHeight;
       renderer.setSize(window.innerWidth, window.innerHeight);
 
       const v = computeViewports();
-
       cameraLeft.aspect = v.leftW / v.eyeH;
       cameraRight.aspect = v.rightW / v.eyeH;
       cameraLeft.updateProjectionMatrix();
@@ -424,30 +544,31 @@
       updateVideoPlane();
     }
 
-    /* Main animation loop */
+    /* ========== ANIMATION LOOP ========== */
     function animate() {
       requestAnimationFrame(animate);
       if (!renderer) return;
 
-      /* PATCH: Ensure video texture updates continuously */
+      /* UPDATE VIDEO TEXTURE */
       if (video && video.readyState >= video.HAVE_ENOUGH_DATA) {
-        if (videoTexture) {
-          videoTexture.needsUpdate = true;
-        }
+        if (videoTexture) videoTexture.needsUpdate = true;
       }
 
-      /* Cursor positioning */
-      const ndc = pointerNDC.clone();
+      /* APPLY GYROSCOPE ROTATION */
+      applyGyroRotation();
+
+      /* CURSOR AT CENTER (GAZE) */
       const cursorDist = 1.2;
-      updateRaycasterFromNDC(ndc, cameraLeft);
+      raycaster.setFromCamera(new THREE.Vector2(0, 0), cameraLeft);
       const origin = raycaster.ray.origin.clone();
       const dir = raycaster.ray.direction.clone();
       const worldCursor = origin.clone().add(dir.multiplyScalar(cursorDist));
+
       cursorMesh.position.copy(worldCursor);
       cursorMesh.lookAt(cameraLeft.getWorldPosition(new THREE.Vector3()));
       cursorMesh.scale.setScalar(cursorDist * 0.02);
 
-      /* Menu interaction */
+      /* MENU HOVER DETECTION */
       if (menuVisible) {
         const intersects = raycaster.intersectObjects(menuPanelGroup.children, true);
         if (intersects.length > 0) {
@@ -458,9 +579,9 @@
             }
             INTERSECTED = obj;
             if (INTERSECTED && INTERSECTED.material && 'emissive' in INTERSECTED.material) {
-              INTERSECTED.material.emissive.setHex(0x404040);
+              INTERSECTED.material.emissive.setHex(0x505050);
             }
-            cursorMesh.scale.multiplyScalar(1.6);
+            cursorMesh.scale.multiplyScalar(2.0);
           }
         } else {
           if (INTERSECTED && INTERSECTED.material && 'emissive' in INTERSECTED.material) {
@@ -476,23 +597,24 @@
         INTERSECTED = null;
       }
 
-      /* Stereo rendering */
+      /* STEREO RENDERING */
       const ipd = baseIPD * (1 + (cameraFov - 70) / 400);
       cameraLeft.position.set(-ipd / 2, 0, 0);
       cameraRight.position.set(ipd / 2, 0, 0);
+
       cameraLeft.quaternion.copy(cameraBase.quaternion);
       cameraRight.quaternion.copy(cameraBase.quaternion);
 
       renderer.clear();
       const v = cachedView;
 
-      /* Render left eye */
+      // LEFT EYE
       renderer.setViewport(v.leftX, 0, v.leftW, v.eyeH);
       renderer.setScissor(v.leftX, 0, v.leftW, v.eyeH);
       renderer.setScissorTest(true);
       renderer.render(scene, cameraLeft);
 
-      /* Render right eye */
+      // RIGHT EYE
       renderer.setViewport(v.rightX, 0, v.rightW, v.eyeH);
       renderer.setScissor(v.rightX, 0, v.rightW, v.eyeH);
       renderer.setScissorTest(true);
