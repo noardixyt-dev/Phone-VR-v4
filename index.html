@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover"/>
-<title>Stereo Viewer (3DOF menu, fixed camera + facing)</title>
+<title>Stereo Viewer (Menu Always Faces You)</title>
 <style>
 html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#000;color:#fff;font-family:sans-serif;}
 #fovControl{position:absolute;top:10px;left:10px;z-index:100;background:rgba(0,0,0,0.4);padding:6px 10px;border-radius:10px;display:flex;align-items:center;gap:8px;transition:opacity .3s;}
@@ -40,7 +40,7 @@ const portraitOverlay=document.getElementById('portraitOverlay');
 const leftEye=document.getElementById('leftEye');
 const rightEye=document.getElementById('rightEye');
 
-/* ---------- UI hiding ---------- */
+/* ---------- UI hiding logic ---------- */
 let hideTimer=null;
 const HIDE_MS=10000;
 function showUI(){
@@ -69,7 +69,7 @@ let deviceActive=false;
 const MENU_DISTANCE=1.3;
 const FIXED_IPD=0.065;
 
-let video, videoTex, videoMesh, sceneVideo, orthoCam;
+let video, videoTex, videoPlane, sceneVideo, orthoCam;
 let fovScale=parseFloat(fovSlider.value);
 fovVal.textContent=fovScale+'%';
 
@@ -107,7 +107,7 @@ async function enableDeviceOrientation(){
   }
 }
 
-/* ---------- Start ---------- */
+/* ---------- Start sequence ---------- */
 startBtn.addEventListener('click',async()=>{
   startBtn.style.display='none';
   await enableDeviceOrientation();
@@ -122,7 +122,7 @@ startBtn.addEventListener('click',async()=>{
   }catch(e){alert('Camera error: '+e.message); startBtn.style.display='block';}
 });
 
-/* ---------- Init ---------- */
+/* ---------- Initialization ---------- */
 function init(){
   renderer=new THREE.WebGLRenderer({antialias:true});
   renderer.setSize(window.innerWidth,window.innerHeight);
@@ -133,10 +133,12 @@ function init(){
   baseCam=new THREE.PerspectiveCamera(70,window.innerWidth/window.innerHeight,0.01,100);
   camL=baseCam.clone(); camR=baseCam.clone();
 
+  // Menu object
   const g=new THREE.BoxGeometry(0.4,0.2,0.05);
   const m=new THREE.MeshStandardMaterial({color:0x2f7fff});
   menuMesh=new THREE.Mesh(g,m); menuMesh.visible=false; scene3D.add(menuMesh);
 
+  // Cursor ring
   const rg=new THREE.RingGeometry(0.01,0.02,32);
   const rm=new THREE.MeshBasicMaterial({color:0xffffff,side:THREE.DoubleSide});
   cursor=new THREE.Mesh(rg,rm); cursor.visible=false; scene3D.add(cursor);
@@ -145,10 +147,10 @@ function init(){
   sceneVideo=new THREE.Scene();
   orthoCam=new THREE.OrthographicCamera(-1,1,1,-1,0,1);
   videoTex=new THREE.VideoTexture(video);
-  const videoMat=new THREE.MeshBasicMaterial({map:videoTex});
-  const geo=new THREE.PlaneGeometry(2,2);
-  videoMesh=new THREE.Mesh(geo,videoMat);
-  sceneVideo.add(videoMesh);
+  const vmat=new THREE.MeshBasicMaterial({map:videoTex});
+  const vgeo=new THREE.PlaneGeometry(2,2);
+  videoPlane=new THREE.Mesh(vgeo,vmat);
+  sceneVideo.add(videoPlane);
 
   window.addEventListener('resize',onResize);
   onResize();
@@ -186,18 +188,13 @@ function onResize(){
   portraitOverlay.style.display=window.innerWidth>window.innerHeight?'none':'flex';
 }
 
-/* ---------- Menu toggle (fix facing) ---------- */
+/* ---------- Menu toggle ---------- */
 function toggleMenu(){
   const show=!menuMesh.visible;
   menuMesh.visible=show;cursor.visible=show;
   if(show){
     const dir=new THREE.Vector3(0,0,-1).applyQuaternion(deviceActive?deviceQuat:baseCam.quaternion);
-    const pos=dir.clone().multiplyScalar(MENU_DISTANCE);
-    menuMesh.position.copy(pos);
-    // face toward camera
-    const camDir=new THREE.Vector3(0,0,1).applyQuaternion(deviceActive?deviceQuat:baseCam.quaternion);
-    const lookAtPos=pos.clone().add(camDir);
-    menuMesh.lookAt(lookAtPos);
+    menuMesh.position.copy(dir.multiplyScalar(MENU_DISTANCE));
   }
 }
 
@@ -207,6 +204,14 @@ function animate(){
   if(!renderer)return;
   if(video.readyState>=2) videoTex.needsUpdate=true;
   if(deviceActive) baseCam.quaternion.copy(deviceQuat);
+
+  // Make menu always face the user
+  if(menuMesh.visible){
+    const lookDir=new THREE.Vector3(0,0,-1).applyQuaternion(baseCam.quaternion);
+    const lookTarget=menuMesh.position.clone().sub(lookDir);
+    menuMesh.lookAt(lookTarget);
+  }
+
   camL.quaternion.copy(baseCam.quaternion);
   camR.quaternion.copy(baseCam.quaternion);
   camL.position.set(-FIXED_IPD/2,0,0);
@@ -215,12 +220,12 @@ function animate(){
   const v=eye;
   renderer.clear();
 
-  // Left eye
+  // Left eye render
   renderer.setViewport(v.leftX,v.y,v.eyeW,v.eyeH);
   renderer.render(sceneVideo,orthoCam);
   renderer.render(scene3D,camL);
 
-  // Right eye
+  // Right eye render
   renderer.setViewport(v.rightX,v.y,v.eyeW,v.eyeH);
   renderer.render(sceneVideo,orthoCam);
   renderer.render(scene3D,camR);
