@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover"/>
-<title>Stereo Viewer (3DOF menu, top UI)</title>
+<title>Stereo Viewer (3DOF menu, fixed camera + facing)</title>
 <style>
 html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#000;color:#fff;font-family:sans-serif;}
 #fovControl{position:absolute;top:10px;left:10px;z-index:100;background:rgba(0,0,0,0.4);padding:6px 10px;border-radius:10px;display:flex;align-items:center;gap:8px;transition:opacity .3s;}
@@ -40,7 +40,7 @@ const portraitOverlay=document.getElementById('portraitOverlay');
 const leftEye=document.getElementById('leftEye');
 const rightEye=document.getElementById('rightEye');
 
-/* ---------- UI hiding logic ---------- */
+/* ---------- UI hiding ---------- */
 let hideTimer=null;
 const HIDE_MS=10000;
 function showUI(){
@@ -69,8 +69,7 @@ let deviceActive=false;
 const MENU_DISTANCE=1.3;
 const FIXED_IPD=0.065;
 
-let video, videoTex, videoPlane, sceneVideo, orthoCam;
-let rtL, rtR, postScene, postMat, postCam;
+let video, videoTex, videoMesh, sceneVideo, orthoCam;
 let fovScale=parseFloat(fovSlider.value);
 fovVal.textContent=fovScale+'%';
 
@@ -108,7 +107,7 @@ async function enableDeviceOrientation(){
   }
 }
 
-/* ---------- Start sequence ---------- */
+/* ---------- Start ---------- */
 startBtn.addEventListener('click',async()=>{
   startBtn.style.display='none';
   await enableDeviceOrientation();
@@ -123,7 +122,7 @@ startBtn.addEventListener('click',async()=>{
   }catch(e){alert('Camera error: '+e.message); startBtn.style.display='block';}
 });
 
-/* ---------- Initialization ---------- */
+/* ---------- Init ---------- */
 function init(){
   renderer=new THREE.WebGLRenderer({antialias:true});
   renderer.setSize(window.innerWidth,window.innerHeight);
@@ -134,35 +133,22 @@ function init(){
   baseCam=new THREE.PerspectiveCamera(70,window.innerWidth/window.innerHeight,0.01,100);
   camL=baseCam.clone(); camR=baseCam.clone();
 
-  // Menu
   const g=new THREE.BoxGeometry(0.4,0.2,0.05);
   const m=new THREE.MeshStandardMaterial({color:0x2f7fff});
   menuMesh=new THREE.Mesh(g,m); menuMesh.visible=false; scene3D.add(menuMesh);
 
-  // Cursor
   const rg=new THREE.RingGeometry(0.01,0.02,32);
   const rm=new THREE.MeshBasicMaterial({color:0xffffff,side:THREE.DoubleSide});
   cursor=new THREE.Mesh(rg,rm); cursor.visible=false; scene3D.add(cursor);
 
-  // Video scene
+  // Video background
   sceneVideo=new THREE.Scene();
-  orthoCam=new THREE.OrthographicCamera(0,window.innerWidth,0,window.innerHeight,-10,10);
+  orthoCam=new THREE.OrthographicCamera(-1,1,1,-1,0,1);
   videoTex=new THREE.VideoTexture(video);
-  const vmat=new THREE.MeshBasicMaterial({map:videoTex});
-  videoPlane=new THREE.Mesh(new THREE.PlaneGeometry(1,1),vmat);
-  sceneVideo.add(videoPlane);
-
-  // Render targets
-  rtL=new THREE.WebGLRenderTarget(1024,1024);
-  rtR=new THREE.WebGLRenderTarget(1024,1024);
-
-  // Post process (basic)
-  postMat=new THREE.MeshBasicMaterial({map:null});
-  postScene=new THREE.Scene();
-  postCam=new THREE.Camera();
-  const fs=new THREE.PlaneGeometry(2,2);
-  const postMesh=new THREE.Mesh(fs,postMat);
-  postScene.add(postMesh);
+  const videoMat=new THREE.MeshBasicMaterial({map:videoTex});
+  const geo=new THREE.PlaneGeometry(2,2);
+  videoMesh=new THREE.Mesh(geo,videoMat);
+  sceneVideo.add(videoMesh);
 
   window.addEventListener('resize',onResize);
   onResize();
@@ -197,17 +183,21 @@ function onResize(){
   renderer.setSize(window.innerWidth,window.innerHeight);
   baseCam.aspect=window.innerWidth/window.innerHeight;baseCam.updateProjectionMatrix();
   computeEyes();
-  const isLandscape=window.innerWidth>window.innerHeight;
-  portraitOverlay.style.display=isLandscape?'none':'flex';
+  portraitOverlay.style.display=window.innerWidth>window.innerHeight?'none':'flex';
 }
 
-/* ---------- Menu toggle ---------- */
+/* ---------- Menu toggle (fix facing) ---------- */
 function toggleMenu(){
   const show=!menuMesh.visible;
   menuMesh.visible=show;cursor.visible=show;
   if(show){
     const dir=new THREE.Vector3(0,0,-1).applyQuaternion(deviceActive?deviceQuat:baseCam.quaternion);
-    menuMesh.position.copy(dir.multiplyScalar(MENU_DISTANCE));
+    const pos=dir.clone().multiplyScalar(MENU_DISTANCE);
+    menuMesh.position.copy(pos);
+    // face toward camera
+    const camDir=new THREE.Vector3(0,0,1).applyQuaternion(deviceActive?deviceQuat:baseCam.quaternion);
+    const lookAtPos=pos.clone().add(camDir);
+    menuMesh.lookAt(lookAtPos);
   }
 }
 
@@ -222,43 +212,18 @@ function animate(){
   camL.position.set(-FIXED_IPD/2,0,0);
   camR.position.set(FIXED_IPD/2,0,0);
 
-  // render both eyes
   const v=eye;
-  const dpr=window.devicePixelRatio||1;
-  const w=v.eyeW*dpr,h=v.eyeH*dpr;
-  rtL.setSize(w,h);rtR.setSize(w,h);
+  renderer.clear();
 
-  // video left
-  renderer.setRenderTarget(rtL);
-  videoPlane.position.set(v.leftX+v.eyeW/2,v.y+v.eyeH/2,0);
-  videoPlane.scale.set(v.eyeW,v.eyeH,1);
-  renderer.render(sceneVideo,orthoCam);
-  renderer.setRenderTarget(null);
-
-  // video right
-  renderer.setRenderTarget(rtR);
-  videoPlane.position.set(v.rightX+v.eyeW/2,v.y+v.eyeH/2,0);
-  videoPlane.scale.set(v.eyeW,v.eyeH,1);
-  renderer.render(sceneVideo,orthoCam);
-  renderer.setRenderTarget(null);
-
-  // draw left
+  // Left eye
   renderer.setViewport(v.leftX,v.y,v.eyeW,v.eyeH);
-  postMat.map=rtL.texture;
-  renderer.render(postScene,postCam);
-  renderer.setViewport(v.rightX,v.y,v.eyeW,v.eyeH);
-  postMat.map=rtR.texture;
-  renderer.render(postScene,postCam);
-
-  // render 3D overlay
-  renderer.setScissorTest(true);
-  renderer.setScissor(v.leftX,v.y,v.eyeW,v.eyeH);
-  renderer.setViewport(v.leftX,v.y,v.eyeW,v.eyeH);
+  renderer.render(sceneVideo,orthoCam);
   renderer.render(scene3D,camL);
-  renderer.setScissor(v.rightX,v.y,v.eyeW,v.eyeH);
+
+  // Right eye
   renderer.setViewport(v.rightX,v.y,v.eyeW,v.eyeH);
+  renderer.render(sceneVideo,orthoCam);
   renderer.render(scene3D,camR);
-  renderer.setScissorTest(false);
 }
 </script>
 </body>
