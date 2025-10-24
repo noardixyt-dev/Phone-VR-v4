@@ -1,298 +1,657 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover">
-<title>Stereo Viewer — Landscape-calibrated 3DOF menu (no-roll)</title>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover" />
+<title>Stereo Camera — Landscape 3DOF Menu (vanilla JS)</title>
 <style>
-html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#000;color:#fff;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial;}
-#controls{position:absolute;z-index:140;left:50%;bottom:20px;display:flex;gap:10px;align-items:center;transform:translateX(-50%);transition:opacity .32s ease,transform .32s ease;background:rgba(0,0,0,0.45);padding:8px 12px;border-radius:8px;font-size:14px;}
-#controls.hidden{opacity:0;pointer-events:none;transform:translateY(20px);}
-#fovSlider{width:200px;}
-#fullscreenBtn{position:absolute;top:10px;right:10px;z-index:140;padding:8px 12px;border-radius:8px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.06);color:#fff;font-size:14px;transition:opacity .32s ease,transform .32s ease;}
-#menu{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);padding:20px 30px;background:rgba(0,127,255,0.85);border-radius:10px;display:none;z-index:150;cursor:pointer;}
-#portraitOverlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.9);z-index:220;color:#fff;font-size:20px;padding:20px;text-align:center;display:none;}
-video{display:none!important;}
+  :root{--bg:#000;--ui-bg:rgba(0,0,0,0.45);--accent:rgba(10,110,255,0.95);--white:#fff}
+  html,body{margin:0;padding:0;height:100%;background:var(--bg);color:var(--white);font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial;overflow:hidden}
+  /* Two eye canvases laid out side-by-side */
+  #leftEye,#rightEye{position:absolute;top:0;height:100%;overflow:hidden;background:#000}
+  #leftEye{left:0}
+  #rightEye{right:0}
+  canvas.videoCanvas{width:100%;height:100%;display:block;object-fit:cover}
+  /* UI: FOV slider & fullscreen */
+  #controls{position:absolute;left:50%;transform:translateX(-50%);bottom:18px;z-index:220;display:flex;gap:8px;align-items:center;padding:8px 12px;border-radius:10px;background:var(--ui-bg);backdrop-filter:blur(6px);transition:opacity .32s,transform .32s}
+  #controls.hidden{opacity:0;pointer-events:none;transform:translateX(-50%) translateY(12px)}
+  #fovSlider{width:220px}
+  #fovVal{min-width:44px;text-align:right;display:inline-block}
+  #fullscreenBtn{padding:8px 10px;border-radius:8px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.06);cursor:pointer;color:var(--white)}
+  /* Menu (rendered twice, once per eye) */
+  .menuStereo{position:absolute;z-index:200;left:50%;top:50%;transform:translate(-50%,-50%);pointer-events:auto;display:flex;align-items:center;justify-content:center;padding:12px 18px;border-radius:10px;background:var(--accent);color:#fff;box-shadow:0 8px 30px rgba(0,0,0,0.6);user-select:none}
+  /* Portrait overlay */
+  #portraitOverlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.92);z-index:300;color:#fff;font-size:18px;padding:20px;text-align:center;display:none}
+  /* Tiny hint */
+  #hint{position:absolute;left:50%;bottom:6px;transform:translateX(-50%);font-size:12px;color:rgba(255,255,255,0.85);z-index:210}
+  /* Invisible video element for camera capture */
+  video#cameraStream{display:none!important}
 </style>
 </head>
 <body>
 
+<!-- Eye containers; we'll create canvas elements inside them sized for computed eye widths/heights -->
+<div id="leftEye"></div>
+<div id="rightEye"></div>
+
+<!-- Two menu divs: left and right (stereo) -->
+<div id="menuLeft" class="menuStereo" style="display:none">Stereo Menu</div>
+<div id="menuRight" class="menuStereo" style="display:none">Stereo Menu</div>
+
+<!-- Controls -->
 <div id="controls">
-  <label>FOV: <span id="fovVal">70%</span></label>
-  <input type="range" id="fovSlider" min="40" max="100" value="70">
+  <label style="font-size:13px">FOV <span id="fovVal">70%</span></label>
+  <input id="fovSlider" type="range" min="40" max="100" value="70" />
+  <button id="fullscreenBtn">Fullscreen</button>
 </div>
 
-<button id="fullscreenBtn">Fullscreen</button>
-<div id="menu">Stereo Menu (clickable)</div>
+<div id="hint">Double-tap to toggle menu • Drag to move pointer • Tap menu to click</div>
+
+<!-- Portrait overlay -->
 <div id="portraitOverlay">Please rotate your device to landscape and grant camera & motion permission</div>
 
-<script src="https://cdn.jsdelivr.net/npm/three@0.153.0/build/three.min.js"></script>
+<!-- Hidden video element used as the camera source -->
+<video id="cameraStream" autoplay muted playsinline></video>
+
 <script>
-/* ---------- UI Elements ---------- */
-const controls = document.getElementById('controls');
+/*
+  Vanilla JS implementation of:
+  - stereo camera feed shown side-by-side in two smaller "eye windows"
+  - FOV slider scales eye windows (40 - 100, default 70)
+  - double-tap toggles a stereo menu rendered in both eyes
+  - menu is 3DOF-tracked (yaw/pitch, roll removed), calibrated for landscape
+  - UI controls (slider + fullscreen) auto-hide after 10s of inactivity
+  - portrait overlay blocks until device in landscape
+  - fullscreen toggle works
+  - no external libraries
+*/
+
+/* ----------------- Config & State ----------------- */
+const UI_HIDE_MS = 10000;
+const IPD = 0.064;              // interpupillary distance (meters)
+const MENU_DISTANCE = 1.4;      // meters forward from camera for menu placement
+let eyeScalePct = 70;           // initial FOV slider percent
+let uiHideTimer = null;
+let menuVisible = false;
+
+/* DOM */
+const leftEye = document.getElementById('leftEye');
+const rightEye = document.getElementById('rightEye');
+const cameraVideo = document.getElementById('cameraStream');
 const fovSlider = document.getElementById('fovSlider');
 const fovVal = document.getElementById('fovVal');
+const controls = document.getElementById('controls');
 const fullscreenBtn = document.getElementById('fullscreenBtn');
-const menuMeshDiv = document.getElementById('menu');
 const portraitOverlay = document.getElementById('portraitOverlay');
+const hint = document.getElementById('hint');
+const menuLeft = document.getElementById('menuLeft');
+const menuRight = document.getElementById('menuRight');
 
-let uiVisible = true;
-let uiHideTimer = null;
-const UI_HIDE_MS = 10000;
-let eyeScalePct = parseFloat(fovSlider.value);
+/* canvases we will draw into (one per eye) */
+let canvasLeft, ctxLeft, canvasRight, ctxRight;
 
-/* ---------- Three.js Scene Setup ---------- */
-let renderer, sceneVideo, scene3D, orthoCam;
-let perspectiveBase, camLeft, camRight;
-let video, videoTexture, videoPlane;
-let menuMesh, cursorMesh;
-let interactiveObjects = [];
-const raycaster = new THREE.Raycaster();
-const pointerNDC = new THREE.Vector2(0,0);
-let INTERSECTED = null;
-let menuVisible = false;
-let lastTap = 0;
+/* offscreen working canvas (source scaled/cropped) */
+let srcCanvas, srcCtx;
 
-/* ---------- Stereo Render Targets ---------- */
-let rtLeft, rtRight, postMaterial, postScene, postCamera;
-const distortionParams = { k1:-0.28, k2:0.08, chroma:0.004 };
-const FIXED_IPD = 0.064;
-const MENU_DISTANCE = 1.4;
+/* video dimensions (from camera) */
+let camVideoWidth = 1280, camVideoHeight = 720;
 
-/* ---------- Device Orientation ---------- */
-let deviceQuat = new THREE.Quaternion();
-let deviceOrientationEnabled = false;
-const euler = new THREE.Euler();
-const qPortraitToThree = new THREE.Quaternion(-Math.sqrt(0.5),0,0,Math.sqrt(0.5));
+/* device orientation state (radians) */
+let deviceEnabled = false;
+let sensorAlpha = 0, sensorBeta = 0, sensorGamma = 0; // degrees
+
+/* Use a flag to indicate if device orientation permission attempted */
+let askedDevicePermission = false;
+
+/* pointer for interaction (not used for depth intersection here but kept for future extension) */
+let pointer = { x: 0.5, y: 0.5 };
+
+/* ----------------- Utilities: math ----------------- */
+
+/* clamp helper */
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+/* convert degrees to radians */
+const d2r = (d) => d * Math.PI / 180;
+
+/*
+  Compute forward vector from yaw (y), pitch (p).
+  We treat yaw = rotation around Y axis, pitch = rotation around X axis.
+  Start with camera looking down -Z: (0,0,-1).
+  Apply pitch then yaw.
+*/
+function forwardFromYawPitch(yaw, pitch){
+  // yaw, pitch in radians
+  // forward after rotations:
+  const cy = Math.cos(yaw), sy = Math.sin(yaw);
+  const cp = Math.cos(pitch), sp = Math.sin(pitch);
+  // rotate (0,0,-1) by pitch around X: gives (0, sp, -cp)
+  // then rotate by yaw around Y:
+  // x = sy * cp * -1? Work it out:
+  const fx = sy * cp * -1;                // sin(yaw) * cp * -1
+  const fy = sp * -1;                     // -sin(pitch)
+  const fz = -cy * cp;                    // -cos(yaw)*cos(pitch)
+  return { x: fx, y: fy, z: fz };
+}
+
+/*
+  Simple pinhole projection:
+  Given a 3D point in camera space (x,y,z) (camera at origin looking -Z),
+  and a focal length f, project to normalized device coords:
+    ndc_x = (x / -z) * f
+    ndc_y = (y / -z) * f
+  Then convert to pixel coordinates given eye viewport center and size.
+*/
+function projectToScreen(point, focal, eyeViewport){
+  // avoid dividing by ~0 or positive z (behind camera)
+  const z = point.z;
+  if(z >= -0.001) return { sx: eyeViewport.cx, sy: eyeViewport.cy, visible:false };
+  const nx = (point.x / -z) * focal;
+  const ny = (point.y / -z) * focal;
+  // map normalized to pixel coordinates within the eye viewport
+  const sx = eyeViewport.cx + nx * (eyeViewport.w/2);
+  const sy = eyeViewport.cy + ny * (eyeViewport.h/2);
+  return { sx, sy, visible:true };
+}
+
+/* ----------------- Viewport & sizing ----------------- */
+
+function computeEyeViewports(){
+  // Based on eyeScalePct and camera aspect ratio, compute pixel sizes and placements
+  const scale = clamp(eyeScalePct/100, 0.4, 1.0);
+  const windowH = window.innerHeight;
+  const windowW = window.innerWidth;
+  const eyeH = Math.round(windowH * scale);
+  // use camera video aspect ratio if available
+  const videoAspect = camVideoWidth > 0 ? (camVideoWidth / camVideoHeight) : (16/9);
+  let eyeW = Math.floor(eyeH * videoAspect);
+  let gap = Math.max(6, Math.round(eyeW * 0.08));
+  if(eyeW * 2 + gap > windowW){
+    eyeW = Math.floor((windowW - gap) / 2);
+  }
+  const totalW = eyeW * 2 + gap;
+  const leftX = Math.floor((windowW - totalW)/2);
+  const rightX = leftX + eyeW + gap;
+  const topY = Math.max(0, windowH - 10 - eyeH); // leave small bottom padding
+  // Return objects describing pixel space for each eye
+  return {
+    left: { x: leftX, y: topY, w: eyeW, h: eyeH, cx: leftX + eyeW/2, cy: topY + eyeH/2 },
+    right: { x: rightX, y: topY, w: eyeW, h: eyeH, cx: rightX + eyeW/2, cy: topY + eyeH/2 },
+    gap, totalW
+  };
+}
+
+function updateEyeContainers(){
+  const v = computeEyeViewports();
+  leftEye.style.width = v.left.w + 'px';
+  leftEye.style.height = v.left.h + 'px';
+  leftEye.style.left = v.left.x + 'px';
+  leftEye.style.top = v.left.y + 'px';
+  rightEye.style.width = v.right.w + 'px';
+  rightEye.style.height = v.right.h + 'px';
+  rightEye.style.left = v.right.x + 'px';
+  rightEye.style.top = v.right.y + 'px';
+  // Ensure canvases match these sizes (device pixels accounted in canvases below)
+  resizeCanvasesToView(v);
+}
+
+/* ----------------- Canvas creation/resizing ----------------- */
+function ensureCanvases(){
+  if(!canvasLeft){
+    canvasLeft = document.createElement('canvas'); canvasLeft.className = 'videoCanvas'; leftEye.appendChild(canvasLeft); ctxLeft = canvasLeft.getContext('2d');
+  }
+  if(!canvasRight){
+    canvasRight = document.createElement('canvas'); canvasRight.className = 'videoCanvas'; rightEye.appendChild(canvasRight); ctxRight = canvasRight.getContext('2d');
+  }
+  if(!srcCanvas){
+    srcCanvas = document.createElement('canvas'); srcCtx = srcCanvas.getContext('2d');
+  }
+}
+
+function resizeCanvasesToView(viewports){
+  ensureCanvases();
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
+  // left
+  canvasLeft.width = Math.max(1, Math.floor(viewports.left.w * dpr));
+  canvasLeft.height = Math.max(1, Math.floor(viewports.left.h * dpr));
+  canvasLeft.style.width = viewports.left.w + 'px';
+  canvasLeft.style.height = viewports.left.h + 'px';
+  // right
+  canvasRight.width = Math.max(1, Math.floor(viewports.right.w * dpr));
+  canvasRight.height = Math.max(1, Math.floor(viewports.right.h * dpr));
+  canvasRight.style.width = viewports.right.w + 'px';
+  canvasRight.style.height = viewports.right.h + 'px';
+  // src canvas: size to camera video resolution (or scaled)
+  const srcW = camVideoWidth || 1280;
+  const srcH = camVideoHeight || 720;
+  srcCanvas.width = srcW;
+  srcCanvas.height = srcH;
+}
+
+/* ----------------- Camera setup ----------------- */
+async function startCamera(){
+  try{
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { exact: "environment" } }, audio: false });
+    cameraVideo.srcObject = stream;
+  }catch(e){
+    // fallback: any camera
+    try{
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      cameraVideo.srcObject = stream;
+    }catch(err){
+      alert('Camera access failed: ' + (err && err.message ? err.message : err));
+      return;
+    }
+  }
+  cameraVideo.addEventListener('loadedmetadata', ()=>{
+    camVideoWidth = cameraVideo.videoWidth || camVideoWidth;
+    camVideoHeight = cameraVideo.videoHeight || camVideoHeight;
+    // initialize canvases after we know video dims
+    updateEyeContainers();
+  }, { once:true });
+}
+
+/* ----------------- Device orientation (landscape calibrated, roll removed) ----------------- */
+
+/*
+  We'll attempt to request permission (iOS Safari requires user gesture).
+  The user asked for automatic permission request; we will attempt immediately.
+  Many browsers require a user gesture to show the permission prompt; this code
+  still tries immediately and falls back to listening to events if permission API not available.
+*/
+async function enableDeviceOrientationAuto(){
+  if(askedDevicePermission) return;
+  askedDevicePermission = true;
+  try{
+    if(typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function'){
+      // Request permission - note: may be blocked unless a user gesture occurs.
+      const perm = await DeviceOrientationEvent.requestPermission();
+      if(perm === 'granted'){
+        window.addEventListener('deviceorientation', onDeviceOrientation);
+        deviceEnabled = true;
+        return;
+      } else {
+        // permission denied or not granted, still attach listener (some browsers ignore API)
+        window.addEventListener('deviceorientation', onDeviceOrientation);
+        deviceEnabled = true;
+        return;
+      }
+    } else {
+      // old style - just add listener
+      window.addEventListener('deviceorientation', onDeviceOrientation);
+      deviceEnabled = true;
+    }
+  }catch(err){
+    // some browsers throw if called outside user gesture - still attach listener
+    try{ window.addEventListener('deviceorientation', onDeviceOrientation); deviceEnabled = true; } catch(e){}
+  }
+}
 
 function getScreenOrientationDeg(){
   if(screen && screen.orientation && typeof screen.orientation.angle === 'number') return screen.orientation.angle;
-  return window.orientation || 0;
+  return (typeof window.orientation !== 'undefined') ? window.orientation : 0;
 }
 
-function setObjectQuaternionFromSensor(quatOut, alpha, beta, gamma){
-  const orient = getScreenOrientationDeg();
+/* Convert sensor alpha/beta/gamma into yaw/pitch with landscape calibration and roll removal.
+   We'll:
+   - read alpha (compass), beta (tilt front/back), gamma (tilt left/right)
+   - build a quaternion from Euler in order 'YXZ' as many implementations do
+   - apply a base rotation for portrait-to-three mapping (here simplified)
+   - rotate based on screen orientation (so landscape works as expected)
+   - zero out roll by converting to Euler and setting z=0
+   - extract yaw and pitch from the Euler (YXZ)
+*/
+function onDeviceOrientation(ev){
+  sensorAlpha = ev.alpha || 0;
+  sensorBeta = ev.beta || 0;
+  sensorGamma = ev.gamma || 0;
+  // compute quaternion manually (small helper)
+  // We'll use standard conversions:
   const degToRad = Math.PI/180;
-  euler.set((beta||0)*degToRad, (alpha||0)*degToRad, -(gamma||0)*degToRad, 'YXZ');
-  quatOut.setFromEuler(euler);
-  let baseRot = new THREE.Quaternion();
-  if(orient === 90) baseRot.setFromAxisAngle(new THREE.Vector3(0,0,1), -Math.PI/2);
-  else if(orient === -90 || orient===270) baseRot.setFromAxisAngle(new THREE.Vector3(0,0,1), Math.PI/2);
-  else if(orient===180) baseRot.setFromAxisAngle(new THREE.Vector3(0,0,1), Math.PI);
-  quatOut.multiply(qPortraitToThree).multiply(baseRot);
-  const e = new THREE.Euler().setFromQuaternion(quatOut,'YXZ'); e.z=0; quatOut.setFromEuler(e);
+  // initial euler (YXZ): y = alpha, x = beta, z = -gamma (matches earlier Three.js code)
+  const y = (sensorAlpha) * degToRad;
+  const x = (sensorBeta) * degToRad;
+  const z = -(sensorGamma) * degToRad;
+  // Build quaternion from Euler YXZ
+  // q = qy * qx * qz (order Y X Z)
+  const qx = quatFromAxisAngle([1,0,0], x);
+  const qy = quatFromAxisAngle([0,1,0], y);
+  const qz = quatFromAxisAngle([0,0,1], z);
+  // q = qy * qx * qz
+  let q = multiplyQuat(qy, multiplyQuat(qx, qz));
+
+  // Portrait-to-three mapping quaternion (rotate -90deg around X)
+  const qPortraitToThree = quatFromAxisAngle([1,0,0], -Math.PI/2);
+  q = multiplyQuat(q, qPortraitToThree);
+
+  // Apply screen orientation base rotation
+  const orient = getScreenOrientationDeg();
+  let baseRot = [0,0,0,1]; // identity
+  if(orient === 90) baseRot = quatFromAxisAngle([0,0,1], -Math.PI/2);
+  else if(orient === -90 || orient === 270) baseRot = quatFromAxisAngle([0,0,1], Math.PI/2);
+  else if(orient === 180) baseRot = quatFromAxisAngle([0,0,1], Math.PI);
+  q = multiplyQuat(q, baseRot);
+
+  // zero out roll: convert to Euler (YXZ), zero Z and convert back
+  const eul = eulerFromQuat(q, 'YXZ'); eul[2] = 0; // z = roll
+  const qNoRoll = quatFromEuler(eul[0], eul[1], eul[2], 'YXZ');
+
+  // Extract yaw (around Y) and pitch (around X) from Euler
+  const e = eulerFromQuat(qNoRoll, 'YXZ'); // [y,x,z]
+  // Yaw = e[0], Pitch = e[1]
+  deviceEnabled = true;
+  // store global for the render loop
+  deviceState.yaw = e[0];
+  deviceState.pitch = e[1];
 }
 
-/* ---------- UI Auto-Hide ---------- */
-function showUI(){
-  uiVisible = true;
-  controls.classList.remove('hidden');
-  fullscreenBtn.style.display = 'block';
-  if(uiHideTimer) clearTimeout(uiHideTimer);
-  uiHideTimer = setTimeout(()=>{ controls.classList.add('hidden'); fullscreenBtn.style.display='none'; uiVisible=false; }, UI_HIDE_MS);
+/* Minimal quaternion helpers (arrays [x,y,z,w]) */
+function quatFromAxisAngle(axis, angle){
+  const ax = axis[0], ay = axis[1], az = axis[2];
+  const half = angle/2, s = Math.sin(half);
+  return [ax*s, ay*s, az*s, Math.cos(half)];
 }
-showUI();
+function multiplyQuat(a,b){
+  // a and b are [x,y,z,w]
+  const ax=a[0], ay=a[1], az=a[2], aw=a[3];
+  const bx=b[0], by=b[1], bz=b[2], bw=b[3];
+  return [
+    aw*bx + ax*bw + ay*bz - az*by,
+    aw*by - ax*bz + ay*bw + az*bx,
+    aw*bz + ax*by - ay*bx + az*bw,
+    aw*bw - ax*bx - ay*by - az*bz
+  ];
+}
+function eulerFromQuat(q, order='YXZ'){
+  // returns [y, x, z] in radians for YXZ extraction to match Three.js ordering used earlier
+  const x=q[0], y=q[1], z=q[2], w=q[3];
+  // convert to rotation matrix
+  const m11 = 1 - 2*(y*y + z*z);
+  const m12 = 2*(x*y + w*z);
+  const m13 = 2*(x*z - w*y);
+  const m21 = 2*(x*y - w*z);
+  const m22 = 1 - 2*(x*x + z*z);
+  const m23 = 2*(y*z + w*x);
+  const m31 = 2*(x*z + w*y);
+  const m32 = 2*(y*z - w*x);
+  const m33 = 1 - 2*(x*x + y*y);
+  // For 'YXZ' order:
+  let yaw, pitch, roll;
+  pitch = Math.asin(clamp(m23, -1, 1)); // m23
+  if (Math.abs(m23) < 0.99999) {
+    yaw = Math.atan2(-m13, m33);
+    roll = Math.atan2(-m21, m22);
+  } else {
+    yaw = Math.atan2(m31, m11);
+    roll = 0;
+  }
+  return [yaw, pitch, roll]; // [y, x, z]
+}
+function quatFromEuler(yaw, pitch, roll, order='YXZ'){
+  // yaw (Y), pitch (X), roll (Z)
+  const cy = Math.cos(yaw*0.5), sy = Math.sin(yaw*0.5);
+  const cp = Math.cos(pitch*0.5), sp = Math.sin(pitch*0.5);
+  const cr = Math.cos(roll*0.5), sr = Math.sin(roll*0.5);
+  // for YXZ: q = qy * qx * qz
+  // qy = [0, sy, 0, cy]
+  // qx = [sp,0,0,cp]
+  // qz = [0,0,sr,cr]
+  // multiply qy * qx:
+  const qy = [0, sy, 0, cy];
+  const qx = [sp, 0, 0, cp];
+  const qz = [0, 0, sr, cr];
+  return multiplyQuat(qy, multiplyQuat(qx, qz));
+}
 
-/* ---------- Event Listeners ---------- */
-fovSlider.addEventListener('input', ()=>{
-  eyeScalePct = parseFloat(fovSlider.value);
-  fovVal.textContent = Math.round(eyeScalePct)+'%';
-  showUI();
-});
+/* store yaw/pitch globally for render loop */
+const deviceState = { yaw: 0, pitch: 0 };
 
-fullscreenBtn.addEventListener('click', async () => {
-  try{ 
-    if(!document.fullscreenElement) await document.documentElement.requestFullscreen();
-    else await document.exitFullscreen();
-  } catch(e){ console.warn('Fullscreen toggle failed', e); }
-});
+/* ----------------- Rendering loop ----------------- */
+function drawFrame(){
+  requestAnimationFrame(drawFrame);
 
-window.addEventListener('pointerdown', ()=>{
-  const now = Date.now();
-  if(now - lastTap < 300){
-    menuVisible = !menuVisible;
-    menuMesh.visible = menuVisible;
-    cursorMesh.visible = menuVisible;
-    if(menuVisible){
-      const camPos = perspectiveBase.position.clone();
-      const camDir = new THREE.Vector3(0,0,-1).applyQuaternion(perspectiveBase.quaternion);
-      menuMesh.position.copy(camPos.clone().add(camDir.multiplyScalar(MENU_DISTANCE)));
-      menuMesh.lookAt(camPos);
+  // don't render in portrait
+  const isLandscape = window.innerWidth >= window.innerHeight;
+  if(!isLandscape){
+    // hide content behind overlay
+    return;
+  }
+
+  // update video source if available
+  if(cameraVideo.readyState >= 2){
+    // draw the source video into srcCanvas (center-crop to ensure fill)
+    const sw = cameraVideo.videoWidth, sh = cameraVideo.videoHeight;
+    if(sw && sh){
+      srcCanvas.width = sw; srcCanvas.height = sh;
+      // draw the video full - we'll let drawImage handle cropping when copying into eye canvases
+      srcCtx.drawImage(cameraVideo, 0, 0, sw, sh);
     }
   }
-  lastTap = now;
-  showUI();
-});
 
-window.addEventListener('resize', onWindowResize);
+  // compute viewports each frame
+  const v = computeEyeViewports();
+  // re-size canvases if needed
+  resizeCanvasesToView(v);
 
-/* ---------- Camera Setup ---------- */
-async function initCamera(){
-  video = document.createElement('video');
-  video.setAttribute('playsinline','');
-  video.autoplay=true; video.muted=true; video.style.display='none';
-  document.body.appendChild(video);
-  try{
-    const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'},audio:false});
-    video.srcObject = stream;
-    await video.play();
-    videoTexture = new THREE.VideoTexture(video);
-    videoTexture.minFilter = THREE.LinearFilter;
-    videoTexture.magFilter = THREE.LinearFilter;
-    videoTexture.format = THREE.RGBAFormat;
-    initThreeJS();
-  } catch(e){
-    alert('Camera access failed: '+e.message);
+  // compute focal length (simple pinhole). Use vertical fov ~ 50deg as base and scale with viewport
+  // We can choose a virtual camera FOV that roughly matches typical mobile - pick 60 deg
+  const fovDeg = 60;
+  const focal = 1 / Math.tan(d2r(fovDeg) / 2);
+
+  // draw left eye: scale + center-crop from srcCanvas to eye canvas
+  // We'll scale the source so it covers the eye canvas with correct aspect ratio (cover)
+  if(srcCanvas.width > 0){
+    // Left
+    const sx = srcCanvas.width, sy = srcCanvas.height;
+    const dw = canvasLeft.width, dh = canvasLeft.height;
+    // compute source rect to cover destination (cover strategy)
+    const srcAspect = sx / sy, dstAspect = dw / dh;
+    let sx0=0, sy0=0, sw= sx, sh = sy;
+    if(srcAspect > dstAspect){
+      // source is wider; crop sides
+      sh = sy;
+      sw = Math.round(sh * dstAspect);
+      sx0 = Math.round((sx - sw)/2);
+      sy0 = 0;
+    } else {
+      // source is taller; crop top/bottom
+      sw = sx;
+      sh = Math.round(sw / dstAspect);
+      sy0 = Math.round((sy - sh)/2);
+      sx0 = 0;
+    }
+    ctxLeft.clearRect(0,0,dw,dh);
+    ctxLeft.drawImage(srcCanvas, sx0, sy0, sw, sh, 0, 0, dw, dh);
+
+    // Right (same)
+    const dwR = canvasRight.width, dhR = canvasRight.height;
+    ctxRight.clearRect(0,0,dwR,dhR);
+    ctxRight.drawImage(srcCanvas, sx0, sy0, sw, sh, 0, 0, dwR, dhR);
+  }
+
+  // 3DOF menu placement: compute camera-space positions and project to each eye viewport
+  // Use deviceState.yaw, deviceState.pitch (radians). Use forward vector from yaw/pitch.
+  const yaw = deviceState.yaw || 0;
+  const pitch = deviceState.pitch || 0;
+  const fwd = forwardFromYawPitch(yaw, pitch);
+
+  // camera is at origin. For each eye, eye pos is offset by +-IPD/2 on X in camera space.
+  // We'll treat units in meters and use simple perspective projection.
+  // For convenience, focal (in world units) scale to screen pixels via: screen = (x / -z) * focalInPx
+  // Compute focalInPx as focal * (eyeViewport.w/2)
+  const vports = computeEyeViewports(); // fresh
+  // choose focal length based on FOV slider? We'll keep fixed camera FOV and rely on projection.
+  const focalWorld = focal; // unitless
+
+  // Left eye
+  const eyeLeftPos = { x: -IPD/2, y: 0, z: 0 };
+  const menuCamPointL = {
+    x: eyeLeftPos.x + fwd.x * MENU_DISTANCE,
+    y: eyeLeftPos.y + fwd.y * MENU_DISTANCE,
+    z: eyeLeftPos.z + fwd.z * MENU_DISTANCE
+  };
+  // project
+  const focalPxL = focalWorld;
+  // Create a viewport descriptor for projectToScreen (center coords in pixels, width/height)
+  const leftViewport = { cx: vports.left.cx, cy: vports.left.cy, w: vports.left.w, h: vports.left.h };
+  // Map 3D to pixel coords within the whole window coordinate system
+  const projL = projectToScreen(menuCamPointL, focalPxL, leftViewport);
+
+  // Right eye
+  const eyeRightPos = { x: IPD/2, y:0, z:0 };
+  const menuCamPointR = {
+    x: eyeRightPos.x + fwd.x * MENU_DISTANCE,
+    y: eyeRightPos.y + fwd.y * MENU_DISTANCE,
+    z: eyeRightPos.z + fwd.z * MENU_DISTANCE
+  };
+  const rightViewport = { cx: vports.right.cx, cy: vports.right.cy, w: vports.right.w, h: vports.right.h };
+  const projR = projectToScreen(menuCamPointR, focalPxL, rightViewport);
+
+  // Position the DOM menu elements at the computed pixel coordinates
+  if(menuVisible){
+    menuLeft.style.display = 'block';
+    menuRight.style.display = 'block';
+    // left: compute CSS left/top relative to page (window coords)
+    menuLeft.style.left = Math.round(projL.sx) + 'px';
+    menuLeft.style.top = Math.round(projL.sy) + 'px';
+    // right
+    menuRight.style.left = Math.round(projR.sx) + 'px';
+    menuRight.style.top = Math.round(projR.sy) + 'px';
+    // scale menu based on z (distance) to give a depth effect
+    const scaleL = clamp(1.0 / (1.0 + Math.max(0, -menuCamPointL.z)/6.0), 0.6, 1.2);
+    const scaleR = clamp(1.0 / (1.0 + Math.max(0, -menuCamPointR.z)/6.0), 0.6, 1.2);
+    menuLeft.style.transform = `translate(-50%,-50%) scale(${scaleL})`;
+    menuRight.style.transform = `translate(-50%,-50%) scale(${scaleR})`;
+  } else {
+    menuLeft.style.display = 'none';
+    menuRight.style.display = 'none';
   }
 }
 
-/* ---------- Three.js Initialization ---------- */
-function initThreeJS(){
-  renderer = new THREE.WebGLRenderer({antialias:true});
-  renderer.setPixelRatio(window.devicePixelRatio||1);
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.autoClear=false;
-  document.body.appendChild(renderer.domElement);
+/* ----------------- UI & interaction ----------------- */
 
-  // Video Scene
-  sceneVideo = new THREE.Scene();
-  orthoCam = new THREE.OrthographicCamera(0, window.innerWidth, 0, window.innerHeight, -10, 10);
-  const vMat = new THREE.MeshBasicMaterial({map:videoTexture});
-  const vGeom = new THREE.PlaneGeometry(1,1);
-  videoPlane = new THREE.Mesh(vGeom,vMat);
-  sceneVideo.add(videoPlane);
-
-  // 3D Scene
-  scene3D = new THREE.Scene();
-  scene3D.add(new THREE.AmbientLight(0xffffff,0.6));
-  const dl = new THREE.DirectionalLight(0xffffff,0.5); dl.position.set(1,2,2); scene3D.add(dl);
-
-  perspectiveBase = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 1000);
-  camLeft = perspectiveBase.clone(); camRight = perspectiveBase.clone();
-
-  // Menu
-  const boxG = new THREE.BoxGeometry(0.45,0.22,0.04);
-  const boxM = new THREE.MeshStandardMaterial({color:0x2f7fff,roughness:0.5,metalness:0.1,emissive:0x000000});
-  menuMesh = new THREE.Mesh(boxG,boxM); menuMesh.visible=false;
-  menuMesh.userData.onClick = ()=>{ menuMesh.material.color.setHex(Math.floor(Math.random()*0xffffff)); };
-  scene3D.add(menuMesh);
-  interactiveObjects.push(menuMesh);
-
-  // Cursor
-  const ringG = new THREE.RingGeometry(0.01,0.02,32);
-  const ringM = new THREE.MeshBasicMaterial({color:0xffffff,side:THREE.DoubleSide});
-  cursorMesh = new THREE.Mesh(ringG,ringM); cursorMesh.visible=false; scene3D.add(cursorMesh);
-
-  // Render targets
-  const rtParams = { minFilter:THREE.LinearFilter, magFilter:THREE.LinearFilter, format:THREE.RGBAFormat };
-  rtLeft = new THREE.WebGLRenderTarget(1024,1024,rtParams);
-  rtRight = new THREE.WebGLRenderTarget(1024,1024,rtParams);
-
-  // Post process material
-  postMaterial = new THREE.ShaderMaterial({
-    uniforms:{
-      mapTex:{value:null}, lensCenter:{value:new THREE.Vector2(0.5,0.5)}, scale:{value:new THREE.Vector2(1,1)}, hmdWarpParam:{value:new THREE.Vector4(distortionParams.k1, distortionParams.k2,0,0)}, chroma:{value:distortionParams.chroma}
-    },
-    vertexShader:`varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position,1.0); }`,
-    fragmentShader:`
-      varying vec2 vUv;
-      uniform sampler2D mapTex; uniform vec2 lensCenter; uniform vec2 scale;
-      uniform vec4 hmdWarpParam; uniform float chroma;
-      void main(){
-        vec2 uv = (vUv-vec2(0.5))*2.0;
-        vec2 lc = (lensCenter-vec2(0.5))*2.0;
-        vec2 theta = (uv-lc)/scale;
-        float rSq = dot(theta,theta);
-        float rFact = 1.0 + hmdWarpParam.x*rSq + hmdWarpParam.y*rSq*rSq;
-        vec2 distorted = lc + theta*rFact*scale;
-        vec2 finalUv = distorted*0.5+vec2(0.5);
-        if(finalUv.x<0.0||finalUv.x>1.0||finalUv.y<0.0||finalUv.y>1.0){ gl_FragColor=vec4(0,0,0,1);}
-        else{ vec4 c = texture2D(mapTex,finalUv); gl_FragColor=c; }
-      }
-    `,
-    depthWrite:false, depthTest:false
-  });
-  postScene = new THREE.Scene();
-  postScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2,2),postMaterial));
-  postCamera = new THREE.Camera(); postCamera.position.z=1;
-
-  onWindowResize();
-  animate();
+/* Show UI controls and reset hide timer */
+function showUI(){
+  controls.classList.remove('hidden');
+  if(uiHideTimer) clearTimeout(uiHideTimer);
+  uiHideTimer = setTimeout(()=>{ controls.classList.add('hidden'); }, UI_HIDE_MS);
 }
 
-/* ---------- Viewport and Resize ---------- */
-function computeViewports(){
-  const scale = Math.max(0.4, Math.min(1.0, eyeScalePct/100));
-  const eyeH = Math.floor(window.innerHeight*scale);
-  const videoAspect = video.videoWidth/video.videoHeight || 16/9;
-  let eyeW = Math.floor(eyeH*videoAspect);
-  const gap = Math.max(6,Math.round(eyeW*0.08));
-  const totalW = eyeW*2+gap;
-  const leftX = Math.floor((window.innerWidth-totalW)/2);
-  const rightX = leftX+eyeW+gap;
-  return {leftX,leftY:window.innerHeight-eyeH-10,leftW:eyeW,leftH:eyeH,rightX,rightY:window.innerHeight-eyeH-10,rightW:eyeW,rightH:eyeH};
+/* Double-tap for menu toggle */
+let lastTap = 0;
+window.addEventListener('pointerdown', (ev) => {
+  const now = Date.now();
+  if (now - lastTap < 300){
+    menuVisible = !menuVisible;
+    // when menu becomes visible ensure device orientation has been enabled (attempt)
+    if(menuVisible) enableDeviceOrientationAuto();
+    showUI();
+  } else {
+    // single tap resets UI timer and shows controls
+    showUI();
+  }
+  lastTap = now;
+});
+
+/* FOV slider handling:
+   The FOV slider controls the *eye window scale* (i.e., how big the side-by-side eye boxes are).
+   We update layout immediately.
+*/
+fovSlider.addEventListener('input', (e) => {
+  eyeScalePct = parseFloat(e.target.value);
+  fovVal.textContent = Math.round(eyeScalePct) + '%';
+  updateEyeContainers();
+  showUI();
+});
+
+/* Fullscreen toggle */
+fullscreenBtn.addEventListener('click', async () => {
+  try {
+    if (!document.fullscreenElement) await document.documentElement.requestFullscreen();
+    else await document.exitFullscreen();
+  } catch(err){ console.warn('Fullscreen failed', err); }
+  showUI();
+});
+
+/* Menu click handler (both left & right menu elements) */
+function onMenuClick(){
+  // example interaction: randomize color
+  const color = `hsl(${Math.floor(Math.random()*360)} 80% 55%)`;
+  menuLeft.style.background = color;
+  menuRight.style.background = color;
+}
+menuLeft.addEventListener('click', onMenuClick);
+menuRight.addEventListener('click', onMenuClick);
+
+/* Pointer move mapping (user drags to update pointer position) */
+let isPointerDown = false;
+window.addEventListener('pointermove', (ev)=>{
+  isPointerDown = true;
+  // convert to normalized screen coords (0..1)
+  pointer.x = ev.clientX / window.innerWidth;
+  pointer.y = ev.clientY / window.innerHeight;
+  showUI();
+});
+window.addEventListener('pointerup', ()=>{ isPointerDown = false; });
+
+/* ----------------- Portrait overlay & resize ----------------- */
+function updatePortraitOverlay(){
+  const isLandscape = window.innerWidth >= window.innerHeight;
+  portraitOverlay.style.display = isLandscape ? 'none' : 'flex';
+  // show/hide eyes and canvas when portrait
+  if(!isLandscape){
+    leftEye.style.display = 'none';
+    rightEye.style.display = 'none';
+    menuLeft.style.display = 'none';
+    menuRight.style.display = 'none';
+  } else {
+    leftEye.style.display = 'block';
+    rightEye.style.display = 'block';
+  }
+  updateEyeContainers();
+}
+window.addEventListener('resize', updatePortraitOverlay);
+window.addEventListener('orientationchange', updatePortraitOverlay);
+
+/* ----------------- Initialization ----------------- */
+function init(){
+  // create canvases
+  ensureCanvases();
+  // attempt camera
+  startCamera();
+  // attempt to enable orientation (try immediately as requested)
+  enableDeviceOrientationAuto();
+  // initial layout
+  updatePortraitOverlay();
+  // fill fov val text
+  fovVal.textContent = eyeScalePct + '%';
+  // start render loop
+  requestAnimationFrame(drawFrame);
 }
 
-function onWindowResize(){
-  if(!renderer) return;
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  if(orthoCam){ orthoCam.left=0; orthoCam.right=window.innerWidth; orthoCam.top=0; orthoCam.bottom=window.innerHeight; orthoCam.updateProjectionMatrix(); }
-  if(perspectiveBase){ perspectiveBase.aspect = window.innerWidth/window.innerHeight; perspectiveBase.updateProjectionMatrix(); }
-  const isLandscape = window.innerWidth>=window.innerHeight;
-  portraitOverlay.style.display = isLandscape?'none':'flex';
-}
+/* ----------------- Start ----------------- */
+init();
 
-/* ---------- Animation Loop ---------- */
-function animate(){
-  requestAnimationFrame(animate);
-  if(!renderer || window.innerWidth<window.innerHeight) return;
-  if(videoTexture) videoTexture.needsUpdate=true;
-
-  const v = computeViewports();
-
-  // Video to RT left
-  videoPlane.position.set(v.leftX+v.leftW/2,v.leftY+v.leftH/2,0);
-  videoPlane.scale.set(v.leftW,v.leftH,1);
-  renderer.setRenderTarget(rtLeft); renderer.clear(); renderer.render(sceneVideo,orthoCam); renderer.setRenderTarget(null);
-
-  // Video to RT right
-  videoPlane.position.set(v.rightX+v.rightW/2,v.rightY+v.rightH/2,0);
-  videoPlane.scale.set(v.rightW,v.rightH,1);
-  renderer.setRenderTarget(rtRight); renderer.clear(); renderer.render(sceneVideo,orthoCam); renderer.setRenderTarget(null);
-
-  // Post-process left
-  renderer.setScissorTest(true);
-  renderer.setScissor(v.leftX, window.innerHeight-v.leftY-v.leftH, v.leftW, v.leftH);
-  renderer.setViewport(v.leftX, window.innerHeight-v.leftY-v.leftH, v.leftW, v.leftH);
-  postMaterial.uniforms.mapTex.value = rtLeft.texture;
-  renderer.render(postScene, postCamera);
-
-  // Post-process right
-  renderer.setScissor(v.rightX, window.innerHeight-v.rightY-v.rightH, v.rightW, v.rightH);
-  renderer.setViewport(v.rightX, window.innerHeight-v.rightY-v.rightH, v.rightW, v.rightH);
-  postMaterial.uniforms.mapTex.value = rtRight.texture;
-  renderer.render(postScene, postCamera);
-  renderer.setScissorTest(false);
-
-  // 3D menu tracking
-  perspectiveBase.quaternion.copy(deviceQuat);
-  camLeft.position.set(-FIXED_IPD/2,0,0); camRight.position.set(FIXED_IPD/2,0,0);
-  camLeft.quaternion.copy(perspectiveBase.quaternion); camRight.quaternion.copy(perspectiveBase.quaternion);
-
-  renderer.setScissorTest(true);
-  renderer.setScissor(v.leftX, window.innerHeight-v.leftY-v.leftH, v.leftW, v.leftH);
-  renderer.setViewport(v.leftX, window.innerHeight-v.leftY-v.leftH, v.leftW, v.leftH);
-  renderer.render(scene3D, camLeft);
-
-  renderer.setScissor(v.rightX, window.innerHeight-v.rightY-v.rightH, v.rightW, v.rightH);
-  renderer.setViewport(v.rightX, window.innerHeight-v.rightY-v.rightH, v.rightW, v.rightH);
-  renderer.render(scene3D, camRight);
-
-  renderer.setScissorTest(false);
-}
-
-/* ---------- Start ---------- */
-initCamera();
+/* ----------------- Notes on behavior implemented in this file -----------------
+ - The camera feed is captured into a hidden <video> element (cameraVideo). Each frame
+   we draw a center-cropped region of the camera onto two canvas elements (one for each eye).
+ - The FOV slider controls how tall the eye windows are relative to screen height (40-100%).
+   The eye windows are then positioned side-by-side with a small gap and centered horizontally.
+ - Double-tap toggles the menu. The menu is represented by two DOM elements (menuLeft/menuRight)
+   that are positioned per-eye by projecting a 3D menu point into each eye's viewport using a
+   simple pinhole camera model. This gives a stereo-consistent placement of the menu without
+   any external 3D library.
+ - Device orientation (yaw & pitch) is used to compute forward vector; roll is removed by
+   zeroing the roll component during quaternion-to-euler conversion, and we apply a screen-orientation
+   rotation so the behavior is consistent and intuitive in landscape-only usage.
+ - The controls (FOV slider + fullscreen button) auto-hide after 10s of inactivity; any pointer
+   activity shows them and resets the timer.
+ - The fullscreen button toggles fullscreen mode for the document.
+ - The code attempts to request DeviceOrientationEvent.requestPermission() immediately (as requested).
+   Some browsers require a user gesture before presenting the permission prompt; this implementation
+   still attempts it and also attaches a fallback listener for deviceorientation events when the
+   permission API is not available or when the prompt cannot be shown automatically.
+------------------------------------------------------------------------- */
 </script>
 </body>
 </html>
