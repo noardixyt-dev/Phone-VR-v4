@@ -3,9 +3,10 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover" />
-<title>Stereo VR Viewer 6DOF</title>
+<title>Phone VR Viewer</title>
 <style>
 html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#000;color:#fff;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial}
+/* Controls */
 #controls{position:absolute;z-index:140;top:10px;left:12px;display:flex;gap:10px;align-items:center;transition:opacity .32s ease,transform .32s ease}
 #controls.hidden{opacity:0;pointer-events:none;transform:translateY(-8px)}
 .control{background:rgba(0,0,0,0.45);backdrop-filter:blur(6px);padding:8px;border-radius:8px;font-size:13px;color:#fff}
@@ -28,10 +29,13 @@ video{display:none!important;}
     <input id="fovSlider" type="range" min="40" max="100" value="70" />
   </div>
 </div>
+
 <button id="fullscreenBtn" class="hidden" style="display:none">Fullscreen</button>
 <button id="startBtn">Tap to Start VR</button>
 <div id="hint">Double-tap to toggle anchored menu • Drag to move cursor • Tap objects to click</div>
+
 <div id="portraitOverlay" style="display:none">Please rotate your phone to landscape and grant camera & motion permission</div>
+
 <div id="leftOutline" class="eye-outline hidden" style="display:none"></div>
 <div id="rightOutline" class="eye-outline hidden" style="display:none"></div>
 
@@ -43,6 +47,8 @@ const controls = document.getElementById('controls');
 const fullscreenBtn = document.getElementById('fullscreenBtn');
 const fovSlider = document.getElementById('fovSlider');
 const fovVal = document.getElementById('fovVal');
+const hint = document.getElementById('hint');
+const portraitOverlay = document.getElementById('portraitOverlay');
 const leftOutline = document.getElementById('leftOutline');
 const rightOutline = document.getElementById('rightOutline');
 
@@ -65,19 +71,18 @@ function hideUI(){
   rightOutline.classList.remove('show'); rightOutline.classList.add('hidden');  
 }
 function resetUIHideTimer(){  
-  if(uiHideTimer) clearTimeout(uiHideTimer);  
+  if (uiHideTimer) clearTimeout(uiHideTimer);  
   uiHideTimer = setTimeout(() => { hideUI(); }, UI_HIDE_MS);  
 }
 
 window.addEventListener('pointermove', ()=>{ resetUIHideTimer(); }, { passive:true });
 controls.addEventListener('pointerdown', ()=>{ showUI(); });
-fullscreenBtn.addEventListener('pointerdown', ()=>{ showUI(); });
 
 /* ---------- State ---------- */
-let renderer, scene3D, sceneVideo;
+let renderer, scene3D;
 let perspectiveBase;
-let video;
-let menuMesh, menuAnchor, cursorMesh;
+let video, videoTexture;
+let menuMesh, cursorMesh;
 let interactiveObjects = [];
 let raycaster = new THREE.Raycaster();
 let pointerNDC = new THREE.Vector2(0,0);
@@ -94,7 +99,6 @@ let cachedView={};
 
 /* ---------- Device orientation ---------- */
 let deviceQuat=new THREE.Quaternion();
-let deviceOrientationEnabled=false;
 const euler = new THREE.Euler();
 const zee = new THREE.Vector3(0,0,1);
 const qPortraitToThree = new THREE.Quaternion(-Math.sqrt(0.5),0,0,Math.sqrt(0.5)); 
@@ -126,15 +130,15 @@ async function enableDeviceOrientation(){
     try{
       const perm=await DeviceOrientationEvent.requestPermission();
       if(perm==='granted'){
-        window.addEventListener('deviceorientation',(ev)=>{deviceOrientationEnabled=true;setObjectQuaternionFromSensor(deviceQuat,ev.alpha,ev.beta,ev.gamma);},true);
+        window.addEventListener('deviceorientation',(ev)=>{setObjectQuaternionFromSensor(deviceQuat,ev.alpha,ev.beta,ev.gamma);},true);
       }else{
-        window.addEventListener('deviceorientation',(ev)=>{deviceOrientationEnabled=true;setObjectQuaternionFromSensor(deviceQuat,ev.alpha,ev.beta,ev.gamma);},true);
+        window.addEventListener('deviceorientation',(ev)=>{setObjectQuaternionFromSensor(deviceQuat,ev.alpha,ev.beta,ev.gamma);},true);
       }
     }catch(e){
-      window.addEventListener('deviceorientation',(ev)=>{deviceOrientationEnabled=true;setObjectQuaternionFromSensor(deviceQuat,ev.alpha,ev.beta,ev.gamma);},true);
+      window.addEventListener('deviceorientation',(ev)=>{setObjectQuaternionFromSensor(deviceQuat,ev.alpha,ev.beta,ev.gamma);},true);
     }
   }else{
-    window.addEventListener('deviceorientation',(ev)=>{deviceOrientationEnabled=true;setObjectQuaternionFromSensor(deviceQuat,ev.alpha,ev.beta,ev.gamma);},true);
+    window.addEventListener('deviceorientation',(ev)=>{setObjectQuaternionFromSensor(deviceQuat,ev.alpha,ev.beta,ev.gamma);},true);
   }
 }
 
@@ -169,7 +173,7 @@ fovSlider.addEventListener('input',()=>{
 });
 
 /* ---------- Renderer & scenes ---------- */
-let rtLeft, rtRight;
+let leftEyeBG, rightEyeBG;
 
 function initRendererAndScenes(){
   renderer=new THREE.WebGLRenderer({antialias:true});
@@ -177,70 +181,26 @@ function initRendererAndScenes(){
   renderer.setSize(window.innerWidth,window.innerHeight);
   renderer.autoClear=false; document.body.appendChild(renderer.domElement);
 
-  // Video scene
-  sceneVideo=new THREE.Scene();
-  const vTex = new THREE.VideoTexture(video);
-  vTex.minFilter=vTex.magFilter=THREE.LinearFilter;
-  const vMat=new THREE.MeshBasicMaterial({map:vTex});
-  const vGeom=new THREE.PlaneGeometry(2,2);
-  const vMesh=new THREE.Mesh(vGeom,vMat); sceneVideo.add(vMesh);
-
-  // 3D scene
   scene3D=new THREE.Scene();
   scene3D.add(new THREE.AmbientLight(0xffffff,0.6));
   const dl=new THREE.DirectionalLight(0xffffff,0.5); dl.position.set(1,2,2); scene3D.add(dl);
 
   perspectiveBase=new THREE.PerspectiveCamera(70,window.innerWidth/window.innerHeight,0.01,1000);
 
+  // Camera background per eye
+  const videoTexture = new THREE.VideoTexture(video);
+  videoTexture.minFilter = videoTexture.magFilter = THREE.LinearFilter;
+  const geom = new THREE.PlaneGeometry(1.5,1);
+  const mat = new THREE.MeshBasicMaterial({map:videoTexture});
+  leftEyeBG = new THREE.Mesh(geom,mat); leftEyeBG.position.set(-FIXED_IPD/2,0,-2); scene3D.add(leftEyeBG);
+  rightEyeBG = new THREE.Mesh(geom,mat); rightEyeBG.position.set(FIXED_IPD/2,0,-2); scene3D.add(rightEyeBG);
+
   // Menu
   const boxG=new THREE.BoxGeometry(0.45,0.22,0.04);
   const boxM=new THREE.MeshStandardMaterial({color:0x2f7fff,roughness:0.5,metalness:0.1});
-  menuMesh=new THREE.Mesh(boxG,boxM);
-  menuMesh.visible=false;
+  menuMesh=new THREE.Mesh(boxG,boxM); menuMesh.visible=false;
   menuMesh.userData.onClick=()=>{menuMesh.material.color.setHex(Math.floor(Math.random()*0xffffff));};
-
-  menuAnchor=new THREE.Object3D();
-  scene3D.add(menuAnchor);
-  menuAnchor.add(menuMesh);
-
-  interactiveObjects.push(menuMesh);
-
-  // Cursor
-  const ringG=new THREE.RingGeometry(0.01,0.02,32);
-  const ringM=new THREE.MeshBasicMaterial({color:0xffffff,side:THREE.DoubleSide});
-  cursorMesh=new THREE.Mesh(ringG,ringM); cursorMesh.visible=false; scene3D.add(cursorMesh);
-
-  computeViewports(); onWindowResize(); window.addEventListener('resize',onWindowResize);
-
-  // Pointer
-  window.addEventListener('pointermove',(ev)=>{pointerNDC.x=(ev.clientX/window.innerWidth)*2-1; pointerNDC.y=-(ev.clientY/window.innerHeight)*2+1; resetUIHideTimer();},{passive:true});
-
-  // Double-tap menu
-  window.addEventListener('pointerdown',(ev)=>{
-    const now=Date.now();
-    if(now-lastTap<300){
-      menuVisible=!menuVisible;
-      if(menuVisible){
-        const camPos=new THREE.Vector3().setFromMatrixPosition(perspectiveBase.matrixWorld);
-        const camDir=new THREE.Vector3(0,0,-1).applyQuaternion(perspectiveBase.quaternion);
-        menuAnchor.position.copy(camPos.clone().add(camDir.multiplyScalar(MENU_DISTANCE)));
-        menuAnchor.lookAt(camPos);
-        menuMesh.visible=true; cursorMesh.visible=true;
-      }else{menuMesh.visible=false; cursorMesh.visible=false;}
-    }
-    lastTap=now; resetUIHideTimer();
-  });
-
-  window.addEventListener('click',()=>{
-    raycaster.setFromCamera(pointerNDC, perspectiveBase);
-    const hits=raycaster.intersectObjects(interactiveObjects,true);
-    if(hits.length>0 && hits[0].object.userData.onClick) hits[0].object.userData.onClick();
-  });
-
-  // Tap upper region to show UI
-  window.addEventListener('pointerdown', (ev)=>{
-    if(ev.clientY<80) showUI();
-  });
+  scene3D.add(menuMesh); interactiveObjects.push(menuMesh);
 
   animate();
 }
@@ -250,8 +210,7 @@ function computeViewports(){
   const bottomPadding=10;
   const scale=Math.max(0.4,Math.min(1.0,eyeScalePct/100));
   const eyeH=Math.floor(window.innerHeight*scale);
-  const videoAspect=(video.videoWidth/video.videoHeight)||16/9;
-  const eyeW=Math.floor(eyeH*1.5); // 1.5:1 window
+  const eyeW=Math.floor(eyeH*1.5);
   const gap=Math.max(6,Math.floor(eyeW*0.08));
   const totalW=eyeW*2+gap;
   const leftX=Math.floor((window.innerWidth-totalW)/2);
@@ -273,52 +232,33 @@ function onWindowResize(){
 }
 
 /* ---------- Animate ---------- */
-function updateMenuScale(){
-  if(!menuVisible) return;
-  const camPos = new THREE.Vector3().setFromMatrixPosition(perspectiveBase.matrixWorld);
-  const distance = camPos.distanceTo(menuAnchor.position);
-  const scaleFactor = distance / MENU_DISTANCE;
-  menuAnchor.scale.setScalar(scaleFactor);
-}
-function constrainMenuToEyeWindows(){
-  if(!menuVisible) return;
-  const pos = menuAnchor.position.clone();
-  const proj = pos.clone().project(perspectiveBase);
-  proj.x = THREE.MathUtils.clamp(proj.x,-0.75,0.75);
-  proj.y = THREE.MathUtils.clamp(proj.y,-0.5,0.5);
-  pos.unproject(perspectiveBase);
-  menuAnchor.position.copy(pos);
-}
-
 function animate(){
   requestAnimationFrame(animate);
-  if(renderer){
-    renderer.clear();
 
-    if(menuVisible){
-      updateMenuScale();
-      constrainMenuToEyeWindows();
-    }
-
-    // Left eye
-    const {leftX,leftY,leftW,leftH}=cachedView;
-    renderer.setScissor(leftX,leftY,leftW,leftH);
-    renderer.setViewport(leftX,leftY,leftW,leftH);
-    renderer.setScissorTest(true);
-    renderer.render(sceneVideo,perspectiveBase);
-    renderer.render(scene3D,perspectiveBase);
-
-    // Right eye
-    const {rightX,rightY,rightW,rightH}=cachedView;
-    renderer.setScissor(rightX,rightY,rightW,rightH);
-    renderer.setViewport(rightX,rightY,rightW,rightH);
-    renderer.setScissorTest(true);
-    renderer.render(sceneVideo,perspectiveBase);
-    renderer.render(scene3D,perspectiveBase);
-
-    renderer.setScissorTest(false);
+  // Update menu: pseudo-6DoF & bounds inside eye window
+  if(menuVisible){
+    const camPos = new THREE.Vector3().setFromMatrixPosition(perspectiveBase.matrixWorld);
+    const camDir = new THREE.Vector3(0,0,-1).applyQuaternion(deviceQuat);
+    const distance = MENU_DISTANCE;
+    menuMesh.position.copy(camPos.clone().add(camDir.multiplyScalar(distance)));
+    menuMesh.lookAt(camPos);
+    const scaleFactor = distance/MENU_DISTANCE; menuMesh.scale.set(scaleFactor,scaleFactor,scaleFactor);
   }
+
+  renderer.clear();
+  renderer.render(scene3D,perspectiveBase);
 }
+
+/* ---------- Double-tap menu toggle ---------- */
+window.addEventListener('pointerdown',(ev)=>{
+  const now=Date.now();
+  if(now-lastTap<300){
+    menuVisible=!menuVisible;
+    menuMesh.visible=menuVisible;
+  }
+  lastTap=now;
+  if(ev.clientY<=120) showUI();
+});
 </script>
 </body>
 </html>
