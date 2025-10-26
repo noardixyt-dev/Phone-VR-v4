@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover" />
-<title>Stereo MR Viewer — Rear camera, crosshair-only interaction</title>
+<title>Stereo MR — Rear camera + Hand Tracking (fixed)</title>
 <style>
-  html,body{height:100%;margin:0;background:#000;color:#fff;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial;overflow:hidden}
+  html,body{height:100%;margin:0;background:#000;color:#fff;font-family:system-ui,Segoe UI,Roboto,Arial;overflow:hidden}
   /* UI */
   #controls{position:absolute;left:12px;top:10px;z-index:140;display:flex;gap:10px;align-items:center;transition:opacity .28s,transform .28s}
   #controls.hidden{opacity:0;pointer-events:none;transform:translateY(-8px)}
@@ -23,7 +23,7 @@
   .crosshair::after{height:2px;width:10px}
   #portraitOverlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.92);z-index:220;color:#fff;font-size:20px;padding:20px;text-align:center}
   video{display:none!important}
-  #diag{position:absolute;left:10px;bottom:10px;z-index:200;color:#0f0;font-family:monospace;font-size:12px;background:rgba(0,0,0,0.6);padding:6px 8px;border-radius:6px;white-space:pre-wrap;display:none}
+  #diag{position:absolute;left:10px;bottom:10px;z-index:200;color:#0f0;font-family:monospace;font-size:12px;background:rgba(0,0,0,0.6);padding:6px 8px;border-radius:6px;white-space:pre-wrap}
 </style>
 </head>
 <body>
@@ -33,7 +33,6 @@
       <input id="fovSlider" type="range" min="40" max="100" value="70" />
     </div>
   </div>
-
   <button id="fullscreenBtn" class="hidden">Fullscreen</button>
   <button id="startBtn">Tap to Start</button>
   <div id="hint">Double-tap to spawn/hide menu • Tap to click</div>
@@ -45,16 +44,25 @@
   <div id="crossLeft" class="crosshair" style="opacity:0.6"></div>
   <div id="crossRight" class="crosshair" style="opacity:0.6"></div>
 
-  <div id="diag"></div>
+  <div id="diag">diag: idle</div>
 
   <!-- libs -->
   <script src="https://cdn.jsdelivr.net/npm/three@0.153.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 
 <script>
-/* ===========================
-   Config & UI helpers
-   =========================== */
+/* ======================================================
+   CONFIG
+   ====================================================== */
+const VIDEO_WIDTH = 640;    // desired camera capture width (ideal)
+const VIDEO_HEIGHT = 480;   // desired camera capture height (ideal)
+const MODEL_FPS = 20;       // throttled MediaPipe frequency (lower = less CPU)
+const DEPTH_BASE = 0.8;     // heuristic: increase to push hands further away
+const DEPTH_MIN = 0.28, DEPTH_MAX = 4.0;
+
+/* ======================================================
+   UI & state
+   ====================================================== */
 const startBtn = document.getElementById('startBtn');
 const controls = document.getElementById('controls');
 const fullscreenBtn = document.getElementById('fullscreenBtn');
@@ -77,14 +85,13 @@ window.addEventListener('touchstart', (e) => { const t = e.touches[0]; if (t && 
 window.addEventListener('pointermove', ()=>{ if (renderer) resetUIHideTimer(); }, { passive:true });
 controls.addEventListener('pointerdown', ()=> showUI() );
 
-/* ===========================
-   Core state
-   =========================== */
+/* ======================================================
+   Three + Media state placeholders
+   ====================================================== */
 let renderer, sceneVideo, scene3D, orthoCam;
-let perspectiveBase, camLeft, camRight;
-let video, vTexLeft, vTexRight;
-let videoPlaneLeft, videoPlaneRight;
-let menuMesh, cursorMesh, interactiveObjects = [];
+let perspectiveBase;
+let video, vTexLeft, vTexRight, videoPlaneLeft, videoPlaneRight;
+let menuMesh, interactiveObjects = [];
 let raycaster = new THREE.Raycaster();
 let pointerNDC = new THREE.Vector2(0,0);
 let lastTap = 0;
@@ -92,7 +99,7 @@ let cachedView = {};
 let deviceQuat = new THREE.Quaternion();
 let deviceOrientationEnabled = false;
 
-/* device orientation helpers (landscape-aware, zero roll) */
+/* device orientation helpers */
 const zee = new THREE.Vector3(0,0,1);
 const euler = new THREE.Euler();
 const qPortraitToThree = new THREE.Quaternion(-Math.sqrt(0.5),0,0,Math.sqrt(0.5));
@@ -119,89 +126,103 @@ async function enableDeviceOrientation(){
       } else {
         window.addEventListener('deviceorientation', (ev) => { deviceOrientationEnabled = true; setObjectQuaternionFromSensor(deviceQuat, ev.alpha, ev.beta, ev.gamma); }, true);
       }
-    } catch(e){
-      window.addEventListener('deviceorientation', (ev) => { deviceOrientationEnabled = true; setObjectQuaternionFromSensor(deviceQuat, ev.alpha, ev.beta, ev.gamma); }, true);
-    }
+    } catch(e){ window.addEventListener('deviceorientation', (ev) => { deviceOrientationEnabled = true; setObjectQuaternionFromSensor(deviceQuat, ev.alpha, ev.beta, ev.gamma); }, true); }
   } else {
     window.addEventListener('deviceorientation', (ev) => { deviceOrientationEnabled = true; setObjectQuaternionFromSensor(deviceQuat, ev.alpha, ev.beta, ev.gamma); }, true);
   }
 }
 
-/* ===========================
-   Rear camera device selection
-   =========================== */
+/* ======================================================
+   Robust rear camera selection & enforcement
+   ====================================================== */
 async function getRearCameraDeviceId(){
   if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return null;
   try {
     const devices = await navigator.mediaDevices.enumerateDevices();
     const vids = devices.filter(d => d.kind === 'videoinput');
+    // attempt to find labeled rear camera (labels available after permission)
     const keys = ['back','rear','environment','main','wide'];
     for (const k of keys) {
       const found = vids.find(v => v.label && v.label.toLowerCase().includes(k));
       if (found) return found.deviceId;
     }
+    // fallback: choose last device (often rear)
     if (vids.length > 0) return vids[vids.length-1].deviceId;
   } catch(e){ console.warn('enumerateDevices failed', e); }
   return null;
 }
 
-/* ===========================
-   Start: camera + fullscreen in same gesture
-   =========================== */
+/* attempt to get a rear-facing stream using progressive fallbacks */
+async function getRearStream(){
+  // Try: facingMode ideal with explicit width/height
+  try {
+    const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: VIDEO_WIDTH }, height: { ideal: VIDEO_HEIGHT } }, audio: false });
+    // check track settings for facingMode if available
+    const track = s.getVideoTracks()[0];
+    const settings = track.getSettings ? track.getSettings() : {};
+    const effectiveFacing = settings && settings.facingMode ? settings.facingMode : null;
+    // If browser selected front despite ideal: try deviceId fallback after labels available
+    if (!effectiveFacing || effectiveFacing.toLowerCase().includes('user')) {
+      // stop stream
+      s.getTracks().forEach(t => t.stop());
+      // enumerate after permission (labels might now be available in some browsers)
+      const id = await getRearCameraDeviceId();
+      if (id) {
+        const s2 = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: id }, width: { ideal: VIDEO_WIDTH }, height: { ideal: VIDEO_HEIGHT } }, audio: false });
+        return s2;
+      } else {
+        // fallback: return original even if front; but we'll try one more time with generic if front
+        const s3 = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        return s3;
+      }
+    } else {
+      return s;
+    }
+  } catch (err) {
+    // facingMode failed -> try deviceId
+    try {
+      const id = await getRearCameraDeviceId();
+      if (id) {
+        const s = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: id }, width: { ideal: VIDEO_WIDTH }, height: { ideal: VIDEO_HEIGHT } }, audio: false });
+        return s;
+      }
+    } catch(e){ console.warn('deviceId path failed', e); }
+    // last resort
+    return navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+  }
+}
+
+/* ======================================================
+   Start handler (single-gesture: camera + fullscreen)
+   ====================================================== */
 startBtn.addEventListener('click', async () => {
   startBtn.disabled = true;
   startBtn.textContent = 'Starting…';
   await enableDeviceOrientation();
 
-  // create hidden video element (single source for everything)
+  // prepare hidden video element used by both the textures and MediaPipe
   video = document.createElement('video');
   video.setAttribute('playsinline','');
   video.autoplay = true; video.muted = true; video.style.display = 'none';
   document.body.appendChild(video);
 
-  // attempt facingMode request first (fast), then verify facing via track settings and fallback to deviceId
-  const tryFacing = async () => {
-    try {
-      const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
-      // check effective facing if available
-      const track = s.getVideoTracks()[0];
-      const settings = track.getSettings ? track.getSettings() : {};
-      const effectiveFacing = settings && settings.facingMode ? settings.facingMode : null;
-      if (!effectiveFacing || effectiveFacing.toLowerCase().includes('user')) {
-        // front camera chosen despite request — fallback to deviceId
-        s.getTracks().forEach(t=>t.stop());
-        const id = await getRearCameraDeviceId();
-        if (id) {
-          const s2 = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: id } }, audio: false });
-          return s2;
-        } else {
-          // no deviceId found; use original stream anyway
-          return s;
-        }
-      } else {
-        return s;
-      }
-    } catch (e) {
-      // facingMode failed — fallback to deviceId
-      try {
-        const id = await getRearCameraDeviceId();
-        if (id) {
-          const s2 = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: id } }, audio: false });
-          return s2;
-        }
-      } catch(e2){ console.warn('deviceId fallback failed', e2); }
-      // last resort generic
-      return navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-    }
-  };
-
   try {
-    const stream = await tryFacing();
+    const stream = await getRearStream();
+    // attach the stream
     video.srcObject = stream;
-    try { await video.play(); } catch(e){}
-    // request fullscreen in same gesture
-    try { if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen(); } catch(e){ console.warn('fullscreen fail', e); }
-    initThreeAndMediapipe(stream); // pass stream for diagnostic if needed
+    try { await video.play(); } catch(e){ /* ignore autoplay block */ }
+
+    // show which device we ended up with
+    const track = stream.getVideoTracks()[0];
+    const settings = (track && track.getSettings) ? track.getSettings() : {};
+    const id = settings && settings.deviceId ? settings.deviceId : (track && track.label ? track.label : 'unknown');
+    const facing = settings && settings.facingMode ? settings.facingMode : 'unknown';
+    diag.textContent = `deviceId: ${id}\nfacingMode: ${facing}\nsize: ${video.videoWidth}x${video.videoHeight}`;
+    // attempt fullscreen in same gesture
+    try { if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen(); } catch(e){ console.warn('fullscreen failed', e); }
+
+    // init renderer + mediapipe, pass the SAME stream for diagnostics
+    initThreeAndMediapipe(stream);
     startBtn.style.display = 'none';
   } catch (err) {
     alert('Camera start failed: ' + (err && err.message ? err.message : err));
@@ -211,75 +232,50 @@ startBtn.addEventListener('click', async () => {
 });
 
 /* fullscreen toggle */
-fullscreenBtn.addEventListener('click', ()=> {
-  try {
-    if (!document.fullscreenElement) document.documentElement.requestFullscreen();
-    else document.exitFullscreen();
-  } catch(e){ console.warn('fullscreen toggle failed', e); }
-});
+fullscreenBtn.addEventListener('click', ()=> { try { if (!document.fullscreenElement) document.documentElement.requestFullscreen(); else document.exitFullscreen(); } catch(e){ console.warn(e); } });
+fovSlider.addEventListener('input', ()=> { eyeScalePct = parseFloat(fovSlider.value); fovVal.textContent = Math.round(eyeScalePct) + '%'; if (renderer) onWindowResize(); showUI(); });
 
-/* FOV slider */
-fovSlider.addEventListener('input', ()=> {
-  eyeScalePct = parseFloat(fovSlider.value);
-  fovVal.textContent = Math.round(eyeScalePct) + '%';
-  if (renderer) onWindowResize();
-  showUI();
-});
-
-/* ===========================
-   Three.js + MediaPipe init
-   =========================== */
+/* ======================================================
+   Three / MediaPipe initialization & render
+   ====================================================== */
 function initThreeAndMediapipe(stream){
-  renderer = new THREE.WebGLRenderer({ antialias:true });
-  renderer.setPixelRatio(window.devicePixelRatio || 1);
+  // reduce pixel ratio to save GPU
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  const targetPR = Math.min(1, window.devicePixelRatio || 1);
+  renderer.setPixelRatio(targetPR);
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.autoClear = false;
   document.body.appendChild(renderer.domElement);
 
-  // video scene (ortho / pixel-space)
+  // ortho video scene
   sceneVideo = new THREE.Scene();
   orthoCam = new THREE.OrthographicCamera(0, window.innerWidth, 0, window.innerHeight, -10, 10);
 
-  // two video textures from same video element
-  vTexLeft = new THREE.VideoTexture(video);
-  vTexLeft.minFilter = vTexLeft.magFilter = THREE.LinearFilter;
-  vTexLeft.wrapS = vTexLeft.wrapT = THREE.ClampToEdgeWrapping;
-  vTexRight = new THREE.VideoTexture(video);
-  vTexRight.minFilter = vTexRight.magFilter = THREE.LinearFilter;
-  vTexRight.wrapS = vTexRight.wrapT = THREE.ClampToEdgeWrapping;
+  // two VideoTextures (same video element) to allow independent cropping
+  vTexLeft = new THREE.VideoTexture(video); vTexLeft.minFilter = vTexLeft.magFilter = THREE.LinearFilter; vTexLeft.wrapS = vTexLeft.wrapT = THREE.ClampToEdgeWrapping;
+  vTexRight = new THREE.VideoTexture(video); vTexRight.minFilter = vTexRight.magFilter = THREE.LinearFilter; vTexRight.wrapS = vTexRight.wrapT = THREE.ClampToEdgeWrapping;
 
-  // two plane meshes (we'll size/position in pixels)
   const pGeom = new THREE.PlaneGeometry(1,1);
-  videoPlaneLeft = new THREE.Mesh(pGeom, new THREE.MeshBasicMaterial({ map: vTexLeft }));
-  videoPlaneLeft.frustumCulled = false; sceneVideo.add(videoPlaneLeft);
-  videoPlaneRight = new THREE.Mesh(pGeom, new THREE.MeshBasicMaterial({ map: vTexRight }));
-  videoPlaneRight.frustumCulled = false; sceneVideo.add(videoPlaneRight);
+  videoPlaneLeft = new THREE.Mesh(pGeom, new THREE.MeshBasicMaterial({ map: vTexLeft })); videoPlaneLeft.frustumCulled = false; sceneVideo.add(videoPlaneLeft);
+  videoPlaneRight = new THREE.Mesh(pGeom, new THREE.MeshBasicMaterial({ map: vTexRight })); videoPlaneRight.frustumCulled = false; sceneVideo.add(videoPlaneRight);
 
-  // 3D scene
+  // 3D scene (menu + hand spheres)
   scene3D = new THREE.Scene();
   scene3D.add(new THREE.AmbientLight(0xffffff, 0.6));
-  const dl = new THREE.DirectionalLight(0xffffff, 0.4); dl.position.set(1,2,2); scene3D.add(dl);
+  const dl = new THREE.DirectionalLight(0xffffff, 0.35); dl.position.set(1,2,2); scene3D.add(dl);
 
   perspectiveBase = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 1000);
-  camLeft = perspectiveBase.clone(); camRight = perspectiveBase.clone();
 
-  // menu: world-fixed; spawn ~1m away when toggled
+  // menu (world-fixed), spawn ~1.0m when toggled
   const boxG = new THREE.BoxGeometry(0.42, 0.24, 0.05);
-  const boxM = new THREE.MeshStandardMaterial({ color:0x2f7fff, roughness:0.45, metalness:0.1 });
-  menuMesh = new THREE.Mesh(boxG, boxM); menuMesh.visible = false;
-  menuMesh.userData.onClick = ()=> { menuMesh.material.color.setHex(Math.floor(Math.random()*0xffffff)); };
-  scene3D.add(menuMesh); interactiveObjects.push(menuMesh);
+  const boxM = new THREE.MeshStandardMaterial({ color:0x2f7fff, roughness:0.45, metalness:0.02 });
+  menuMesh = new THREE.Mesh(boxG, boxM); menuMesh.visible = false; scene3D.add(menuMesh); interactiveObjects.push(menuMesh);
 
-  // cursor ring (we keep it for hover visuals but do NOT use it for clicks)
-  const ringG = new THREE.RingGeometry(0.01, 0.02, 32);
-  cursorMesh = new THREE.Mesh(ringG, new THREE.MeshBasicMaterial({ color:0xffffff, side:THREE.DoubleSide }));
-  cursorMesh.visible = false; scene3D.add(cursorMesh);
-
-  // hand spheres (visible)
+  // hand spheres (visible; 2 hands x 21)
   const maxHands = 2;
   const handSpheres = [];
   for (let h=0; h<maxHands; h++){
-    const arr=[];
+    const arr = [];
     for (let i=0;i<21;i++){
       const s = new THREE.Mesh(new THREE.SphereGeometry(0.012, 8, 8), new THREE.MeshStandardMaterial({ color:0xff9a00, emissive:0x220000 }));
       s.visible = false; scene3D.add(s); arr.push(s);
@@ -287,21 +283,18 @@ function initThreeAndMediapipe(stream){
     handSpheres.push(arr);
   }
 
-  // MediaPipe Hands setup (we will call hands.send manually to avoid MediaPipe Camera re-request)
+  // MediaPipe hands (no Camera helper — we manually send frames to avoid re-request)
   const hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
   hands.setOptions({
     maxNumHands: 2,
-    modelComplexity: 0,        // lower complexity to reduce CPU usage
-    selfieMode: false,        // important: use non-mirrored coordinates
+    modelComplexity: 0,   // keep light weight
+    selfieMode: false,   // important: coordinates not mirrored
     minDetectionConfidence: 0.55,
     minTrackingConfidence: 0.5
   });
 
-  // depth mapping tuning
-  const depthBase = 0.8; // increase = farther
-  const depthMin = 0.28, depthMax = 4.0;
-
   hands.onResults((results) => {
+    // world camera pos for unproject
     const camWorld = new THREE.Vector3(); perspectiveBase.getWorldPosition(camWorld);
     if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
       for (let h=0; h<maxHands; h++) for (let i=0;i<21;i++) handSpheres[h][i].visible = false;
@@ -313,8 +306,8 @@ function initThreeAndMediapipe(stream){
       // palm size heuristic
       const dx = lm[0].x - lm[9].x, dy = lm[0].y - lm[9].y;
       const palmSize = Math.sqrt(dx*dx + dy*dy);
-      let depth = depthBase / Math.max(0.02, palmSize);
-      depth = Math.min(depthMax, Math.max(depthMin, depth));
+      let depth = DEPTH_BASE / Math.max(0.02, palmSize);
+      depth = Math.min(DEPTH_MAX, Math.max(DEPTH_MIN, depth));
       for (let i=0;i<lm.length;i++){
         const L = lm[i];
         const ndcX = L.x * 2 - 1;
@@ -329,29 +322,25 @@ function initThreeAndMediapipe(stream){
     }
   });
 
-  // Throttle MediaPipe send to ~24fps to reduce lag
-  let lastMpTime = 0;
-  const mpIntervalMs = 1000 / 24;
-  function mpTick(){
+  // throttle MediaPipe sends
+  let lastMp = 0;
+  const interval = 1000 / MODEL_FPS;
+  (function mpLoop(){
     const now = performance.now();
-    if (now - lastMpTime >= mpIntervalMs) {
-      lastMpTime = now;
-      try { hands.send({ image: video }); } catch(e) { /* ignore */ }
+    if (video.readyState >= 2 && now - lastMp >= interval) {
+      lastMp = now;
+      try { hands.send({ image: video }); } catch(e){ /* ignore occasional errors */ }
     }
-    requestAnimationFrame(mpTick);
-  }
-  mpTick(); // start throttled loop
+    requestAnimationFrame(mpLoop);
+  })();
 
-  // layout + events
-  computeViewports(); onWindowResize(); window.addEventListener('resize', onWindowResize);
+  // layout and events
+  computeViewports();
+  window.addEventListener('resize', onWindowResize);
 
-  window.addEventListener('pointermove', (ev) => {
-    pointerNDC.x = (ev.clientX/window.innerWidth)*2 -1;
-    pointerNDC.y = - (ev.clientY/window.innerHeight)*2 +1;
-    resetUIHideTimer();
-  }, { passive:true });
+  window.addEventListener('pointermove', (ev) => { pointerNDC.x = (ev.clientX/window.innerWidth)*2 -1; pointerNDC.y = - (ev.clientY/window.innerHeight)*2 +1; resetUIHideTimer(); }, { passive:true });
 
-  // double-tap toggles world-fixed menu (spawn ~1.0m)
+  // double-tap to spawn/hide menu
   window.addEventListener('pointerdown', (ev) => {
     const now = Date.now();
     if (now - lastTap < 300) {
@@ -363,7 +352,6 @@ function initThreeAndMediapipe(stream){
         menuMesh.position.copy(pos);
         menuMesh.lookAt(camWorld);
         menuMesh.visible = true;
-        cursorMesh.visible = false; // cursor mesh not used for clicks
         crossLeft.style.opacity = 1; crossRight.style.opacity = 1;
       } else {
         menuMesh.visible = false;
@@ -374,24 +362,22 @@ function initThreeAndMediapipe(stream){
     resetUIHideTimer();
   });
 
-  // click handling: only crosshair center ray triggers clicks, and only if menu visible
+  // click only via crosshair center and only if menu visible
   window.addEventListener('click', ()=> {
     if (!menuMesh.visible) return;
     const cn = getEyeCenterNDC('left');
     raycaster.setFromCamera(cn, perspectiveBase);
     const hits = raycaster.intersectObjects(interactiveObjects, true);
-    if (hits.length > 0 && hits[0].object.userData && typeof hits[0].object.userData.onClick === 'function') {
-      hits[0].object.userData.onClick();
-    }
+    if (hits.length > 0 && hits[0].object.userData && typeof hits[0].object.userData.onClick === 'function') hits[0].object.userData.onClick();
   });
 
-  // start render loop
+  // start animation
   animate();
 }
 
-/* ===========================
-   computeViewports (bottom anchored, scale from bottom -> up)
-   =========================== */
+/* ======================================================
+   computeViewports (bottom-anchored upward-scaling)
+   ====================================================== */
 function computeViewports(){
   const bottomPadding = 10;
   const scale = Math.max(0.4, Math.min(1.0, eyeScalePct/100));
@@ -406,10 +392,8 @@ function computeViewports(){
   const totalW = eyeW*2 + gap;
   const leftX = Math.floor((window.innerWidth - totalW)/2);
   const rightX = leftX + eyeW + gap;
-  // bottom anchored: topY = windowHeight - bottomPadding - eyeHeight
-  const topY = window.innerHeight - bottomPadding - eyeH;
+  const topY = window.innerHeight - bottomPadding - eyeH; // bottom anchored
   cachedView = { leftX, leftY: topY, leftW: eyeW, leftH: eyeH, rightX, rightY: topY, rightW: eyeW, rightH: eyeH, gap };
-  // outlines & crosshairs
   leftOutline.style.left = cachedView.leftX + 'px'; leftOutline.style.top = cachedView.leftY + 'px';
   leftOutline.style.width = cachedView.leftW + 'px'; leftOutline.style.height = cachedView.leftH + 'px';
   rightOutline.style.left = cachedView.rightX + 'px'; rightOutline.style.top = cachedView.rightY + 'px';
@@ -420,7 +404,6 @@ function computeViewports(){
   crossRight.style.top  = (cachedView.rightY + cachedView.rightH/2 - 9) + 'px';
   return cachedView;
 }
-
 function getEyeCenterNDC(which){
   if (!cachedView.leftW) computeViewports();
   const v = cachedView;
@@ -428,18 +411,11 @@ function getEyeCenterNDC(which){
   const py = (which === 'left') ? (v.leftY + v.leftH/2) : (v.rightY + v.rightH/2);
   return new THREE.Vector2( (px/window.innerWidth)*2 -1, - (py/window.innerHeight)*2 +1 );
 }
+function onWindowResize(){ if (!renderer) return; renderer.setSize(window.innerWidth, window.innerHeight); perspectiveBase.aspect = window.innerWidth/window.innerHeight; perspectiveBase.updateProjectionMatrix(); computeViewports(); }
 
-function onWindowResize(){
-  if (!renderer) return;
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  perspectiveBase.aspect = window.innerWidth / window.innerHeight;
-  perspectiveBase.updateProjectionMatrix();
-  computeViewports();
-}
-
-/* ===========================
-   Render loop
-   =========================== */
+/* ======================================================
+   Render loop: video per-eye (cropped fill) + world
+   ====================================================== */
 function animate(){
   requestAnimationFrame(animate);
   if (!renderer) return;
@@ -448,76 +424,56 @@ function animate(){
   const isLandscape = window.innerWidth >= window.innerHeight;
   portraitOverlay.style.display = isLandscape ? 'none' : 'flex';
   if (!isLandscape) { leftOutline.classList.add('hidden'); rightOutline.classList.add('hidden'); controls.classList.add('hidden'); fullscreenBtn.classList.add('hidden'); }
-  else { /* show/hide controlled by UI logic */ }
 
-  // apply device orientation to perspective
+  // apply orientation to 3D camera
   if (deviceOrientationEnabled) perspectiveBase.quaternion.copy(deviceQuat);
   else perspectiveBase.quaternion.identity();
 
-  // viewports
   const v = cachedView.leftW ? cachedView : computeViewports();
   const leftViewportY = window.innerHeight - v.leftY - v.leftH;
 
-  // compute texture crop params (fill behavior) for both eyes
+  // compute video aspect & cropping
   const videoAR = (video && video.videoWidth) ? (video.videoWidth / video.videoHeight) : (16/9);
-
   function computeTexParams(videoAR, eyeAR){
     if (videoAR > eyeAR) {
-      const repeatX = eyeAR / videoAR;
-      const repeatY = 1;
-      const offsetX = (1 - repeatX)/2;
-      return { repeatX, repeatY, offsetX, offsetY:0 };
+      const repeatX = eyeAR / videoAR; const repeatY = 1; const offsetX = (1 - repeatX) / 2;
+      return { repeatX, repeatY, offsetX, offsetY: 0 };
     } else {
-      const repeatX = 1;
-      const repeatY = videoAR / eyeAR;
-      const offsetY = (1 - repeatY)/2;
-      return { repeatX, repeatY, offsetX:0, offsetY };
+      const repeatX = 1; const repeatY = videoAR / eyeAR; const offsetY = (1 - repeatY) / 2;
+      return { repeatX, repeatY, offsetX: 0, offsetY };
     }
   }
 
   const pL = computeTexParams(videoAR, v.leftW / v.leftH);
-  if (vTexLeft) { vTexLeft.repeat.set(pL.repeatX, pL.repeatY); vTexLeft.offset.set(pL.offsetX, pL.offsetY); }
-  if (videoPlaneLeft) { videoPlaneLeft.scale.set(v.leftW, v.leftH, 1); videoPlaneLeft.position.set(v.leftX + v.leftW/2, v.leftY + v.leftH/2, 0); }
+  if (vTexLeft){ vTexLeft.repeat.set(pL.repeatX, pL.repeatY); vTexLeft.offset.set(pL.offsetX, pL.offsetY); }
+  if (videoPlaneLeft){ videoPlaneLeft.scale.set(v.leftW, v.leftH, 1); videoPlaneLeft.position.set(v.leftX + v.leftW/2, v.leftY + v.leftH/2, 0); }
 
-  // left eye render: video (pixel-space) then world
+  // left eye: draw video (pixel-space) then 3D
   renderer.setScissorTest(true);
   renderer.setScissor(v.leftX, leftViewportY, v.leftW, v.leftH);
   renderer.setViewport(v.leftX, leftViewportY, v.leftW, v.leftH);
-  renderer.clear();
-  renderer.render(sceneVideo, orthoCam);
-  renderer.clearDepth();
-  renderer.render(scene3D, perspectiveBase);
+  renderer.clear(); renderer.render(sceneVideo, orthoCam);
+  renderer.clearDepth(); renderer.render(scene3D, perspectiveBase);
 
   // right eye
   const pR = computeTexParams(videoAR, v.rightW / v.rightH);
-  if (vTexRight) { vTexRight.repeat.set(pR.repeatX, pR.repeatY); vTexRight.offset.set(pR.offsetX, pR.offsetY); }
-  if (videoPlaneRight) { videoPlaneRight.scale.set(v.rightW, v.rightH, 1); videoPlaneRight.position.set(v.rightX + v.rightW/2, v.rightY + v.rightH/2, 0); }
+  if (vTexRight){ vTexRight.repeat.set(pR.repeatX, pR.repeatY); vTexRight.offset.set(pR.offsetX, pR.offsetY); }
+  if (videoPlaneRight){ videoPlaneRight.scale.set(v.rightW, v.rightH, 1); videoPlaneRight.position.set(v.rightX + v.rightW/2, v.rightY + v.rightH/2, 0); }
 
   renderer.setScissor(v.rightX, leftViewportY, v.rightW, v.rightH);
   renderer.setViewport(v.rightX, leftViewportY, v.rightW, v.rightH);
-  renderer.clearDepth();
-  renderer.render(sceneVideo, orthoCam);
-  renderer.clearDepth();
-  renderer.render(scene3D, perspectiveBase);
+  renderer.clearDepth(); renderer.render(sceneVideo, orthoCam);
+  renderer.clearDepth(); renderer.render(scene3D, perspectiveBase);
 
   renderer.setScissorTest(false);
 
-  // cursor (1.0m forward) — used for hover only
-  const centerNDC = getEyeCenterNDC('left');
-  raycaster.setFromCamera(centerNDC, perspectiveBase);
-  const camWorld = new THREE.Vector3(); perspectiveBase.getWorldPosition(camWorld);
-  const dir = raycaster.ray.direction.clone();
-  const cursorDist = 1.0;
-  const cursorPos = camWorld.clone().add(dir.multiplyScalar(cursorDist));
-  if (menuMesh && menuMesh.visible) { cursorMesh.visible = false; } // keep hidden; crosshair for hover
-
-  // crosshair hover detection
+  // hover detection & crosshair
   updateCrosshairHover();
 }
 
-/* ===========================
-   crosshair hover & click behavior
-   =========================== */
+/* ======================================================
+   Crosshair hover & click behavior (only crosshair interacts)
+   ====================================================== */
 let INTERSECTED = null;
 function updateCrosshairHover(){
   const leftNDC = getEyeCenterNDC('left');
@@ -535,15 +491,16 @@ function updateCrosshairHover(){
     if (INTERSECTED && INTERSECTED.material && 'emissive' in INTERSECTED.material) INTERSECTED.material.emissive.setHex(0x000000);
     INTERSECTED = null;
   }
-  // right eye opacity mirrors left for simplicity
+  // right eye mirrors left opacity
   const rightNDC = getEyeCenterNDC('right');
   raycaster.setFromCamera(rightNDC, perspectiveBase);
   const hitsR = raycaster.intersectObjects(interactiveObjects, true);
   crossRight.style.opacity = hitsR.length > 0 ? '1' : '0.35';
 }
 
-/* initial compute */
+/* kick off initial layout */
 computeViewports();
+
 </script>
 </body>
 </html>
