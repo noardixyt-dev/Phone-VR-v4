@@ -3,160 +3,168 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Stereo VR Phone Viewer</title>
+<title>Phone VR Viewer</title>
 <style>
-  body, html { margin:0; padding:0; overflow:hidden; background:black; }
-  #cameraFeedLeft, #cameraFeedRight {
-    position:absolute; top:0; width:auto; height:auto; object-fit:cover;
+  body {
+    margin: 0;
+    overflow: hidden;
+    background: #000;
+    touch-action: none;
   }
-  #eyeWindowLeft, #eyeWindowRight {
-    position:absolute; border:2px solid gray; overflow:hidden;
-    background:black;
+  canvas {
+    display: block;
   }
-  #uiControls {
-    position:absolute; top:10px; left:50%; transform:translateX(-50%);
-    display:flex; gap:10px; opacity:0; transition:opacity 0.3s;
+  #uiTop {
+    position: absolute;
+    top: 0;
+    width: 100%;
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    opacity: 0;
+    transition: opacity 0.3s;
   }
-  button, input { font-size:16px; }
-  #menu {
-    position:absolute; width:50%; height:50%; background:rgba(255,255,255,0.9);
-    border-radius:10px; display:none; transition:all 0.3s;
+  .uiButton {
+    padding: 5px 10px;
+    background: #fff;
+    border-radius: 5px;
+    font-size: 14px;
+    cursor: pointer;
+    user-select: none;
   }
 </style>
 </head>
 <body>
 
-<video id="cameraFeed" autoplay playsinline style="display:none;"></video>
-
-<div id="eyeWindowLeft"></div>
-<div id="eyeWindowRight"></div>
-
-<div id="uiControls">
-  <button id="fullscreenBtn">Fullscreen</button>
-  <input id="fovSlider" type="range" min="50" max="100" value="70">
-  <button id="debugToggle">Debug</button>
+<div id="uiTop">
+  <div id="fullscreenBtn" class="uiButton">Fullscreen</div>
+  <input id="fovSlider" type="range" min="50" max="100" value="70" class="uiButton">
+  <div id="debugToggle" class="uiButton">Debug</div>
 </div>
 
-<div id="menu">MENU CONTENT</div>
+<canvas id="vrCanvas"></canvas>
 
-<script>
-const cameraFeed = document.getElementById('cameraFeed');
-const eyeLeft = document.getElementById('eyeWindowLeft');
-const eyeRight = document.getElementById('eyeWindowRight');
-const uiControls = document.getElementById('uiControls');
-const menu = document.getElementById('menu');
-const fullscreenBtn = document.getElementById('fullscreenBtn');
-const fovSlider = document.getElementById('fovSlider');
-const debugToggle = document.getElementById('debugToggle');
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.module.js';
+import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.152.2/examples/jsm/controls/OrbitControls.js';
 
-let eyeWindowRatio = 1.5; // 1.5:1 width:height
-let eyeWindowScale = parseInt(fovSlider.value)/100;
-let gapPixels = 10;
-let menuVisible = false;
+let scene, camera, renderer, leftEye, rightEye, eyeGap = 10;
+let video, videoTexture;
+let menu, menuVisible = false;
+let fovSlider = document.getElementById('fovSlider');
+let uiTop = document.getElementById('uiTop');
 
-// Request rear camera with highest resolution fallback
-async function startCamera() {
+init();
+animate();
+
+function init() {
+  // Scene
+  scene = new THREE.Scene();
+
+  // Camera (main perspective, not used for stereo yet)
+  camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+  camera.position.z = 5;
+
+  // Renderer
+  renderer = new THREE.WebGLRenderer({canvas: document.getElementById('vrCanvas'), antialias: true});
+  renderer.setSize(window.innerWidth, window.innerHeight);
+
+  // Eye windows
+  const eyeWidth = 1.5;
+  const eyeHeight = 1;
+  const eyeGeo = new THREE.PlaneGeometry(eyeWidth, eyeHeight);
+
+  const matLeft = new THREE.MeshBasicMaterial({color: 0x333333, side: THREE.DoubleSide});
+  const matRight = new THREE.MeshBasicMaterial({color: 0x333333, side: THREE.DoubleSide});
+
+  leftEye = new THREE.Mesh(eyeGeo, matLeft);
+  rightEye = new THREE.Mesh(eyeGeo, matRight);
+
+  // Position eyes horizontally with gap, bottom-anchored
+  updateEyePositions(0.7); // 70% default scale
+
+  scene.add(leftEye);
+  scene.add(rightEye);
+
+  // Menu (just a placeholder box)
+  const menuGeo = new THREE.BoxGeometry(1, 0.6, 0.05);
+  const menuMat = new THREE.MeshBasicMaterial({color: 0x00ff00});
+  menu = new THREE.Mesh(menuGeo, menuMat);
+  menu.position.set(0, 1.5, -1.5);
+  menu.visible = menuVisible;
+  scene.add(menu);
+
+  // Video texture
+  video = document.createElement('video');
+  video.autoplay = true;
+  video.muted = true;
+  video.playsInline = true;
+
+  // Camera selection: rear/main camera
   const constraints = {
     audio: false,
     video: {
-      facingMode: { exact: "environment" },
+      facingMode: { ideal: "environment" },
       width: { ideal: 3840 },
       height: { ideal: 2160 }
     }
   };
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia(constraints);
-    cameraFeed.srcObject = stream;
-    cameraFeed.play();
-    requestAnimationFrame(updateFrames);
-  } catch (e) {
-    console.error("Camera error:", e);
-  }
+  navigator.mediaDevices.getUserMedia(constraints).then(stream => {
+    video.srcObject = stream;
+    video.play();
+    videoTexture = new THREE.VideoTexture(video);
+    const videoMat = new THREE.MeshBasicMaterial({map: videoTexture});
+    leftEye.material = videoMat;
+    rightEye.material = videoMat;
+  }).catch(err => console.error('Camera error:', err));
+
+  // Event listeners
+  window.addEventListener('resize', onWindowResize);
+  fovSlider.addEventListener('input', () => updateEyePositions(fovSlider.value/100));
+  document.body.addEventListener('dblclick', toggleMenu);
+  document.body.addEventListener('touchstart', () => uiTop.style.opacity = 1);
+
+  // Fullscreen button
+  document.getElementById('fullscreenBtn').addEventListener('click', () => {
+    if (!document.fullscreenElement) document.body.requestFullscreen();
+    else document.exitFullscreen();
+  });
 }
 
-function updateEyeWindows() {
-  const screenW = window.innerWidth;
-  const screenH = window.innerHeight;
-  const windowHeight = screenH * eyeWindowScale;
-  const windowWidth = windowHeight * eyeWindowRatio;
-  const dynamicGap = gapPixels * eyeWindowScale;
-
-  // Top edge fixed, scale downward
-  const top = 0;
-
-  eyeLeft.style.width = windowWidth + 'px';
-  eyeLeft.style.height = windowHeight + 'px';
-  eyeLeft.style.top = top + 'px';
-  eyeLeft.style.left = (screenW/2 - windowWidth - dynamicGap/2) + 'px';
-
-  eyeRight.style.width = windowWidth + 'px';
-  eyeRight.style.height = windowHeight + 'px';
-  eyeRight.style.top = top + 'px';
-  eyeRight.style.left = (screenW/2 + dynamicGap/2) + 'px';
+function toggleMenu() {
+  menuVisible = !menuVisible;
+  menu.visible = menuVisible;
 }
 
-function updateFrames() {
-  const screenW = window.innerWidth;
-  const screenH = window.innerHeight;
+function updateEyePositions(scale) {
+  const screenWidth = window.innerWidth;
+  const screenHeight = window.innerHeight;
 
-  const videoW = cameraFeed.videoWidth;
-  const videoH = cameraFeed.videoHeight;
-  if(videoW && videoH){
-    // Fit video inside eye windows while cropping overflow
-    [eyeLeft, eyeRight].forEach(eye=>{
-      const eyeW = parseFloat(eye.style.width);
-      const eyeH = parseFloat(eye.style.height);
-      const scale = Math.max(eyeW/videoW, eyeH/videoH);
-      const vw = videoW * scale;
-      const vh = videoH * scale;
-      eye.style.backgroundImage = `url(${cameraFeed.srcObject ? cameraFeed.srcObject : ''})`;
-      eye.style.backgroundSize = `${vw}px ${vh}px`;
-      eye.style.backgroundPosition = `center center`;
-      eye.style.backgroundRepeat = 'no-repeat';
-    });
-  }
+  const windowHeight = screenHeight * scale;
+  const aspect = 1.5 / 1; // 1.5:1 ratio
+  const windowWidth = windowHeight * aspect;
 
-  requestAnimationFrame(updateFrames);
+  // Bottom anchored
+  const bottomY = -screenHeight/2 + windowHeight/2;
+
+  leftEye.scale.set(windowWidth, windowHeight, 1);
+  rightEye.scale.set(windowWidth, windowHeight, 1);
+
+  leftEye.position.set(-windowWidth/2 - eyeGap/2, bottomY, 0);
+  rightEye.position.set(windowWidth/2 + eyeGap/2, bottomY, 0);
 }
 
-// FOV Slider
-fovSlider.addEventListener('input', ()=> {
-  eyeWindowScale = parseInt(fovSlider.value)/100;
-  updateEyeWindows();
-});
+function onWindowResize() {
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}
 
-// Fullscreen
-fullscreenBtn.addEventListener('click', ()=> {
-  if(!document.fullscreenElement){
-    document.documentElement.requestFullscreen();
-  } else {
-    document.exitFullscreen();
-  }
-});
-
-// Debug toggle
-debugToggle.addEventListener('click', ()=>{
-  alert("Debug toggled"); // placeholder
-});
-
-// Double tap to toggle menu
-let lastTap = 0;
-window.addEventListener('touchend', function(e) {
-  const currentTime = new Date().getTime();
-  const tapLength = currentTime - lastTap;
-  if(tapLength < 300 && tapLength > 0){
-    menuVisible = !menuVisible;
-    menu.style.display = menuVisible ? 'block' : 'none';
-  }
-  lastTap = currentTime;
-});
-
-// Update positions
-updateEyeWindows();
-startCamera();
-window.addEventListener('resize', updateEyeWindows);
+function animate() {
+  requestAnimationFrame(animate);
+  renderer.render(scene, camera);
+}
 </script>
 
 </body>
 </html>
-
