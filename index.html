@@ -3,24 +3,23 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover"/>
-<title>Stereo VR Viewer — fixed camera output & interaction</title>
+<title>Stereo VR Viewer — Fixed camera, hand alignment, anchored menu</title>
 <style>
   html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#000;color:#fff;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial}
   /* UI */
-  #controls{position:absolute;z-index:220;top:10px;left:12px;display:flex;gap:10px;align-items:center;transition:opacity .32s ease,transform .32s ease}
+  #controls{position:absolute;z-index:300;top:10px;left:12px;display:flex;gap:10px;align-items:center;transition:opacity .32s ease,transform .32s ease}
   #controls.hidden{opacity:0;pointer-events:none;transform:translateY(-8px)}
   .control{background:rgba(0,0,0,0.45);backdrop-filter:blur(6px);padding:8px;border-radius:8px;font-size:13px;color:#fff}
   #fovSlider{width:220px}
-  #fullscreenBtn{position:absolute;top:10px;right:10px;z-index:220;padding:8px 12px;border-radius:8px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.06);color:#fff;font-size:14px;transition:opacity .32s}
+  #fullscreenBtn{position:absolute;top:10px;right:10px;z-index:300;padding:8px 12px;border-radius:8px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.06);color:#fff;font-size:14px;transition:opacity .32s}
   #fullscreenBtn.hidden{opacity:0;pointer-events:none;transform:translateY(-8px)}
-  #startBtn{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);padding:14px 20px;border-radius:10px;background:#111;color:#fff;z-index:230;border:1px solid rgba(255,255,255,0.06);font-size:16px}
-  #hint{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);font-size:12px;opacity:0.9;padding:6px 10px;border-radius:8px;background:rgba(0,0,0,0.35);z-index:210}
-  #portraitOverlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.9);z-index:240;color:#fff;font-size:20px;padding:20px;text-align:center}
-  .eye-outline{position:absolute;border-radius:8px;pointer-events:none;z-index:200;box-shadow:0 6px 24px rgba(0,0,0,0.6);border:1px solid rgba(255,255,255,0.06);transition:opacity .25s}
-  .eye-outline.hidden{opacity:0}
-  .eye-outline.show{opacity:1}
-  .corner-ind { position:absolute; width:18px; height:18px; border-radius:6px; background:rgba(255,255,255,0.12); pointer-events:none; z-index:210; transition:background .12s; display:none; }
+  #startBtn{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);padding:14px 20px;border-radius:10px;background:#111;color:#fff;z-index:320;border:1px solid rgba(255,255,255,0.06);font-size:16px}
+  #hint{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);font-size:12px;opacity:0.9;padding:6px 10px;border-radius:8px;background:rgba(0,0,0,0.35);z-index:290}
+  #portraitOverlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.9);z-index:360;color:#fff;font-size:20px;padding:20px;text-align:center}
+  .eye-outline{position:absolute;border-radius:8px;pointer-events:none;z-index:280;box-shadow:0 6px 24px rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.06);transition:opacity .25s}
+  .corner-ind { position:absolute; width:18px; height:18px; border-radius:6px; background:rgba(255,255,255,0.12); pointer-events:none; z-index:290; transition:background .12s; display:none; }
   .corner-ind.active{ background:rgba(255,255,255,0.9); display:block; }
+  #debugBox{position: absolute; left: 12px; bottom: 12px; z-index: 400; background: rgba(0,0,0,0.55); color:#0f0; font-size:11px; padding:8px; border-radius:6px; max-width: 46vw; pointer-events:none}
   video{display:none!important;}
 </style>
 </head>
@@ -35,22 +34,27 @@
   <button id="fullscreenBtn" class="hidden" style="display:none">Fullscreen</button>
   <button id="startBtn">Start AR/VR</button>
   <div id="hint">Double-tap to toggle anchored menu • Pinch to drag corners</div>
+
   <div id="portraitOverlay" style="display:none">Please rotate your phone to landscape and grant camera & motion permission</div>
 
-  <div id="leftOutline" class="eye-outline hidden" style="display:none"></div>
-  <div id="rightOutline" class="eye-outline hidden" style="display:none"></div>
+  <div id="leftOutline" class="eye-outline" style="display:none"></div>
+  <div id="rightOutline" class="eye-outline" style="display:none"></div>
 
   <div id="cornerTL" class="corner-ind" style="left:6px;top:6px"></div>
   <div id="cornerTR" class="corner-ind" style="right:6px;top:6px"></div>
   <div id="cornerBL" class="corner-ind" style="left:6px;bottom:6px"></div>
   <div id="cornerBR" class="corner-ind" style="right:6px;bottom:6px"></div>
 
+  <div id="debugBox">camera: —</div>
+
 <script src="https://cdn.jsdelivr.net/npm/three@0.153.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 
 <script>
-/* ============ UI & state ============ */
+/* ---------------------------
+   UI and state
+   --------------------------- */
 const startBtn = document.getElementById('startBtn');
 const controls = document.getElementById('controls');
 const fullscreenBtn = document.getElementById('fullscreenBtn');
@@ -63,16 +67,18 @@ const cornerTL = document.getElementById('cornerTL');
 const cornerTR = document.getElementById('cornerTR');
 const cornerBL = document.getElementById('cornerBL');
 const cornerBR = document.getElementById('cornerBR');
+const debugBox = document.getElementById('debugBox');
 
-let uiVisible = true, uiHideTimer = null;
-const UI_HIDE_MS = 10000;
-function showUI(){ uiVisible=true; controls.style.display='flex'; controls.classList.remove('hidden'); fullscreenBtn.style.display='block'; fullscreenBtn.classList.remove('hidden'); leftOutline.classList.remove('hidden'); leftOutline.classList.add('show'); rightOutline.classList.remove('hidden'); rightOutline.classList.add('show'); resetUIHideTimer(); }
-function hideUI(){ uiVisible=false; controls.classList.add('hidden'); fullscreenBtn.classList.add('hidden'); /* keep outlines visible */ }
-function resetUIHideTimer(){ if(uiHideTimer) clearTimeout(uiHideTimer); uiHideTimer = setTimeout(()=>{ /* fade controls and fullscreen only */ controls.classList.add('hidden'); fullscreenBtn.classList.add('hidden'); }, UI_HIDE_MS); }
+let uiVisible = true, uiHideTimer = null; const UI_HIDE_MS = 10000;
+function showUI(){ uiVisible=true; controls.style.display='flex'; controls.classList.remove('hidden'); fullscreenBtn.style.display='block'; fullscreenBtn.classList.remove('hidden'); leftOutline.style.display='block'; rightOutline.style.display='block'; resetUIHideTimer(); }
+function hideUI(){ uiVisible=false; controls.classList.add('hidden'); fullscreenBtn.classList.add('hidden'); /* outlines remain */ }
+function resetUIHideTimer(){ if(uiHideTimer) clearTimeout(uiHideTimer); uiHideTimer = setTimeout(()=>{ controls.classList.add('hidden'); fullscreenBtn.classList.add('hidden'); }, UI_HIDE_MS); }
 window.addEventListener('pointermove', ()=>{ resetUIHideTimer(); }, { passive:true });
 controls.addEventListener('pointerdown', ()=>{ showUI(); });
 
-/* ============ Global state ============ */
+/* ---------------------------
+   Global state
+   --------------------------- */
 let renderer, sceneVideo, scene3D, orthoCam;
 let perspectiveBase, camLeft, camRight;
 let videoEl, videoTexture;
@@ -85,7 +91,7 @@ const MENU_DISTANCE = 1.2;
 const MENU_MIN_DISTANCE = 0.4;
 const MENU_MAX_DISTANCE = 3.0;
 
-/* device orientation helpers */
+/* device orientation helpers (landscape calibrated, remove roll) */
 const zee = new THREE.Vector3(0,0,1), euler = new THREE.Euler();
 const qPortraitToThree = new THREE.Quaternion(-Math.sqrt(0.5),0,0,Math.sqrt(0.5));
 let deviceQuat = new THREE.Quaternion(), deviceOrientationEnabled = false;
@@ -106,11 +112,13 @@ async function enableDeviceOrientation(){
   } else { window.addEventListener('deviceorientation', ev=>{ deviceOrientationEnabled=true; setObjectQuaternionFromSensor(deviceQuat, ev.alpha, ev.beta, ev.gamma); }, true); }
 }
 
-/* ============ Choose rear camera ============ */
+/* ---------------------------
+   Choose rear camera (with retry)
+   --------------------------- */
 async function chooseRearCameraDeviceId(){
   try{
-    const devs = await navigator.mediaDevices.enumerateDevices();
-    const cams = devs.filter(d=>d.kind==='videoinput');
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const cams = devices.filter(d=>d.kind==='videoinput');
     for(const c of cams){
       const L = (c.label||'').toLowerCase();
       if(L.includes('back')||L.includes('rear')||L.includes('environment')||L.includes('main')||L.includes('wide')) return c.deviceId;
@@ -119,26 +127,33 @@ async function chooseRearCameraDeviceId(){
       const L = (c.label||'').toLowerCase();
       if(!L.includes('front') && !L.includes('selfie')) return c.deviceId;
     }
-    return cams.length? cams[0].deviceId : null;
-  }catch(e){ return null; }
+    return cams.length ? cams[0].deviceId : null;
+  }catch(e){
+    return null;
+  }
 }
 
-/* ============ Start handler ============ */
+/* ---------------------------
+   Start handler — gets camera and initializes everything
+   --------------------------- */
 startBtn.addEventListener('click', async ()=>{
   startBtn.style.display = 'none';
   await enableDeviceOrientation();
   showUI();
 
+  // try to pick rear deviceId, else fallback to facingMode environment
   const rearId = await chooseRearCameraDeviceId();
-  const constraints = rearId ? { video: { deviceId: { exact: rearId }, width: { ideal: 1920 }, height: { ideal: 1080 } } }
-                             : { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } } };
+  const constraints = rearId
+    ? { video: { deviceId: { exact: rearId }, width: { ideal: 1920 }, height: { ideal: 1080 } } }
+    : { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } } };
+
   try{
     const stream = await navigator.mediaDevices.getUserMedia(constraints);
     videoEl = document.createElement('video');
-    videoEl.setAttribute('playsinline','');
-    videoEl.autoplay = true; videoEl.muted = true;
+    videoEl.setAttribute('playsinline',''); videoEl.autoplay=true; videoEl.muted=true;
     videoEl.srcObject = stream;
     await videoEl.play();
+    updateDebugTrackInfo();
   }catch(err){
     alert('Camera access failed: ' + (err && err.message ? err.message : err));
     startBtn.style.display = 'block';
@@ -152,7 +167,21 @@ startBtn.addEventListener('click', async ()=>{
   animate();
 });
 
-/* ============ Three setup ============ */
+/* show which camera is active for debugging */
+function updateDebugTrackInfo(){
+  if(!videoEl || !videoEl.srcObject) { debugBox.textContent = 'camera: not ready'; return; }
+  const t = videoEl.srcObject.getVideoTracks()[0];
+  if(!t) { debugBox.textContent = 'camera: no track'; return; }
+  const s = t.getSettings ? t.getSettings() : {};
+  debugBox.textContent = 'camera: ' + (s.deviceId ? ('deviceId: ' + s.deviceId.substr(0,8) + '…') : 'unknown') + '\n' +
+                         'facingMode: ' + (s.facingMode || 'n/a') + '\n' +
+                         'requested: ' + (s.width || '?') + 'x' + (s.height || '?');
+  debugBox.style.display = 'block';
+}
+
+/* ---------------------------
+   Three.js init
+   --------------------------- */
 function initThree(){
   renderer = new THREE.WebGLRenderer({ antialias:true });
   renderer.setPixelRatio(window.devicePixelRatio || 1);
@@ -160,7 +189,7 @@ function initThree(){
   renderer.autoClear = false;
   document.body.appendChild(renderer.domElement);
 
-  // video scene pixel-space
+  // video plane scene (pixel-space)
   sceneVideo = new THREE.Scene();
   orthoCam = new THREE.OrthographicCamera(0, window.innerWidth, 0, window.innerHeight, -10, 10);
 
@@ -178,53 +207,75 @@ function initThree(){
   scene3D.add(new THREE.AmbientLight(0xffffff, 0.8));
   const dl = new THREE.DirectionalLight(0xffffff, 0.4); dl.position.set(1,2,2); scene3D.add(dl);
 
-  perspectiveBase = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 1000);
+  perspectiveBase = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 1000);
   camLeft = perspectiveBase.clone(); camRight = perspectiveBase.clone();
 
   // menu
-  const g = new THREE.BoxGeometry(0.45, 0.3, 0.03);
-  const m = new THREE.MeshStandardMaterial({ color:0x283844, roughness:0.6, metalness:0.05, transparent:true, opacity:0.98 });
-  menuMesh = new THREE.Mesh(g,m); menuMesh.visible = false; scene3D.add(menuMesh);
+  const menuG = new THREE.BoxGeometry(0.45, 0.28, 0.03);
+  const menuM = new THREE.MeshStandardMaterial({ color: 0x283844, roughness:0.6, metalness:0.05, transparent:true, opacity:0.98 });
+  menuMesh = new THREE.Mesh(menuG, menuM);
+  menuMesh.visible = false;
+  scene3D.add(menuMesh);
+
+  // corner handles
   menuMesh.userData.cornerMeshes = [];
-  const handleG = new THREE.BoxGeometry(0.04,0.04,0.01);
-  for(let i=0;i<4;i++){ const h = new THREE.Mesh(handleG, new THREE.MeshStandardMaterial({ color:0xffffff, transparent:true, opacity:0.12 })); h.visible=false; scene3D.add(h); menuMesh.userData.cornerMeshes.push(h); }
+  const handleG = new THREE.BoxGeometry(0.04, 0.04, 0.01);
+  for(let i=0;i<4;i++){
+    const hm = new THREE.Mesh(handleG, new THREE.MeshStandardMaterial({ color:0xffffff, transparent:true, opacity:0.12 }));
+    hm.visible = false;
+    scene3D.add(hm);
+    menuMesh.userData.cornerMeshes.push(hm);
+  }
 
   // hand spheres
   for(let i=0;i<21;i++){
-    const s = new THREE.Mesh(new THREE.SphereGeometry(0.01,8,8), new THREE.MeshBasicMaterial({ color:0xff6666 }));
-    s.visible=false; scene3D.add(s); handSpheres.push(s);
+    const s = new THREE.Mesh(new THREE.SphereGeometry(0.01, 8, 8), new THREE.MeshBasicMaterial({ color: 0xff6666 }));
+    s.visible = false;
+    scene3D.add(s);
+    handSpheres.push(s);
   }
 
   // pointer + palm line
   const pointerDot = new THREE.Mesh(new THREE.SphereGeometry(0.008,8,8), new THREE.MeshBasicMaterial({ color:0x88ffcc }));
-  pointerDot.visible=false; scene3D.add(pointerDot); scene3D.userData.pointerDot = pointerDot;
+  pointerDot.visible = false;
+  scene3D.add(pointerDot);
+  scene3D.userData.pointerDot = pointerDot;
+
   const lineMat = new THREE.LineBasicMaterial({ color:0x00ff88 });
-  const lineG = new THREE.BufferGeometry().setFromPoints([ new THREE.Vector3(), new THREE.Vector3(0,0,-0.5) ]);
-  const palmLine = new THREE.Line(lineG, lineMat); palmLine.visible=false; scene3D.add(palmLine); scene3D.userData.palmLine = palmLine;
+  const lineGeom = new THREE.BufferGeometry().setFromPoints([ new THREE.Vector3(), new THREE.Vector3(0,0,-0.5) ]);
+  const palmLine = new THREE.Line(lineGeom, lineMat);
+  palmLine.visible = false;
+  scene3D.add(palmLine);
+  scene3D.userData.palmLine = palmLine;
 }
 
-/* ============ MediaPipe Hands setup ============ */
+/* ---------------------------
+   MediaPipe hands (same video stream)
+   --------------------------- */
 function initMediaPipeHands(){
-  mpHands = new Hands({ locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
-  mpHands.setOptions({ maxNumHands: 2, modelComplexity: 0, minDetectionConfidence: 0.55, minTrackingConfidence: 0.55 });
+  mpHands = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+  mpHands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.55, minTrackingConfidence: 0.55 });
   mpHands.onResults(onHandsResults);
 
-  mpCamera = new Camera(videoEl, {
-    onFrame: async ()=>{ await mpHands.send({ image: videoEl }); },
-    width: 1280, height: 720
-  });
+  mpCamera = new Camera(videoEl, { onFrame: async () => { await mpHands.send({ image: videoEl }); }, width: 1280, height: 720 });
   mpCamera.start();
 }
-function onHandsResults(results){ handsLatest = results; }
+function onHandsResults(results){
+  handsLatest = results;
+  // update debug occasionally
+  if(videoEl && videoEl.srcObject) updateDebugTrackInfo();
+}
 
-/* ============ Viewport / eye windows ============ */
+/* ---------------------------
+   Viewport layout (1.5:1 windows anchored bottom)
+   --------------------------- */
 function computeViewports(){
   const bottomPadding = 10;
-  const scale = Math.max(0.4, Math.min(1.0, eyeScalePct/100));
+  const scale = Math.max(0.4, Math.min(1.0, eyeScalePct / 100));
   let eyeH = Math.round(window.innerHeight * scale);
   let eyeW = Math.round(eyeH * 1.5);
   let gap = Math.max(6, Math.round(eyeW * 0.08));
-  if(eyeW *2 + gap > window.innerWidth){
+  if(eyeW * 2 + gap > window.innerWidth){
     const avail = window.innerWidth - gap;
     eyeW = Math.floor(avail / 2);
     eyeH = Math.floor(eyeW / 1.5);
@@ -234,146 +285,210 @@ function computeViewports(){
   const rightX = leftX + eyeW + gap;
   const topY = window.innerHeight - bottomPadding - eyeH;
   cachedView = { leftX, leftY: topY, leftW: eyeW, leftH: eyeH, rightX, rightY: topY, rightW: eyeW, rightH: eyeH, gap };
-  leftOutline.style.left = cachedView.leftX + 'px'; leftOutline.style.top = cachedView.leftY + 'px'; leftOutline.style.width = cachedView.leftW + 'px'; leftOutline.style.height = cachedView.leftH + 'px'; leftOutline.style.display='block';
-  rightOutline.style.left = cachedView.rightX + 'px'; rightOutline.style.top = cachedView.rightY + 'px'; rightOutline.style.width = cachedView.rightW + 'px'; rightOutline.style.height = cachedView.rightH + 'px'; rightOutline.style.display='block';
-  // corner indicators initially hidden, they'll become visible only when hovering
-  cornerTL.style.display = 'none'; cornerTR.style.display='none'; cornerBL.style.display='none'; cornerBR.style.display='none';
+  leftOutline.style.left = cachedView.leftX + 'px';
+  leftOutline.style.top = cachedView.leftY + 'px';
+  leftOutline.style.width = cachedView.leftW + 'px';
+  leftOutline.style.height = cachedView.leftH + 'px';
+  leftOutline.style.display = 'block';
+  rightOutline.style.left = cachedView.rightX + 'px';
+  rightOutline.style.top = cachedView.rightY + 'px';
+  rightOutline.style.width = cachedView.rightW + 'px';
+  rightOutline.style.height = cachedView.rightH + 'px';
+  rightOutline.style.display = 'block';
+  // corner indicators hidden initially
+  cornerTL.style.display = cornerTR.style.display = cornerBL.style.display = cornerBR.style.display = 'none';
 }
 
-/* ============ Helpers: landmarks -> world ============ */
-function landmarkToWorld(lm){
-  const planeW = 1.6, planeH = 1.0;
-  const x = (lm.x - 0.5) * planeW;
-  const y = (0.5 - lm.y) * planeH;
-  const z = -0.2 - (lm.z || 0) * 0.8;
-  return new THREE.Vector3(x,y,z);
-}
-function computePalmNormal(landmarks){
-  if(!landmarks) return new THREE.Vector3(0,0,-1);
-  const w = new THREE.Vector3(landmarks[0].x, landmarks[0].y, landmarks[0].z);
-  const i = new THREE.Vector3(landmarks[5].x, landmarks[5].y, landmarks[5].z);
-  const p = new THREE.Vector3(landmarks[17].x, landmarks[17].y, landmarks[17].z);
-  const v1 = i.sub(w), v2 = p.sub(w);
-  const n = new THREE.Vector3().crossVectors(v1, v2).normalize();
-  return new THREE.Vector3(n.x, -n.y, n.z);
-}
-function isPinchingOneHand(lm){
-  if(!lm) return false;
-  const dx = lm[4].x - lm[8].x; const dy = lm[4].y - lm[8].y;
-  return Math.sqrt(dx*dx+dy*dy) < 0.04;
+/* ---------------------------
+   Map MediaPipe landmark -> world point correctly aligned with camera
+   Approach:
+     - Convert normalized landmark (0..1) to NDC (-1..1)
+     - Cast a ray from the active perspective camera through that NDC and place a point at a chosen distance (handDepth)
+   This aligns the spheres with the video in screen space and keeps orientation correct.
+   --------------------------- */
+function landmarkScreenToWorld(lm, camera, distance){
+  // lm.x, lm.y normalized [0..1] from mediapipe
+  const ndcX = (lm.x - 0.5) * 2;
+  const ndcY = -(lm.y - 0.5) * 2;
+  // create a point at NDC (z=0.0 in clip space) then unproject to get a direction
+  const ndcPoint = new THREE.Vector3(ndcX, ndcY, 0.5); // z doesn't matter; we use ray direction
+  const worldPoint = ndcPoint.clone().unproject(camera);
+  const dir = worldPoint.sub(camera.position).normalize();
+  return camera.position.clone().add(dir.multiplyScalar(distance));
 }
 
-/* ============ Interaction ============ */
-let dragging = false, draggingCorner = -1, pinchActive = false;
+/* compute palm normal using three world-space points (wrist, index_mcp, pinky_mcp) */
+function computePalmNormalWorld(w, i, p){
+  const v1 = i.clone().sub(w);
+  const v2 = p.clone().sub(w);
+  const normal = new THREE.Vector3().crossVectors(v1, v2).normalize();
+  // ensure normal faces outwards (z negative forward)
+  if(normal.z > 0) normal.z *= -1;
+  return normal;
+}
+
+/* pinch detection */
+function isPinching(landmarks){
+  if(!landmarks) return false;
+  const dx = landmarks[4].x - landmarks[8].x, dy = landmarks[4].y - landmarks[8].y;
+  return Math.sqrt(dx*dx + dy*dy) < 0.04;
+}
+
+/* ---------------------------
+   Interaction: handle palm beam, spheres, pinch drag/scale
+   --------------------------- */
+let dragging=false, draggingCorner=-1, pinchActive=false;
 let menuStartPos = new THREE.Vector3(), menuStartScale = new THREE.Vector3(), dragOffset = new THREE.Vector3();
 function updateCornerHandlesWorld(){
   const params = menuMesh.geometry.parameters;
   const hw = params.width/2, hh = params.height/2;
-  const local = [ new THREE.Vector3(-hw, hh, params.depth/2), new THREE.Vector3(hw, hh, params.depth/2), new THREE.Vector3(-hw, -hh, params.depth/2), new THREE.Vector3(hw, -hh, params.depth/2) ];
-  local.forEach((lc, idx)=>{
+  const localCorners = [ new THREE.Vector3(-hw, hh, params.depth/2), new THREE.Vector3(hw, hh, params.depth/2), new THREE.Vector3(-hw, -hh, params.depth/2), new THREE.Vector3(hw, -hh, params.depth/2) ];
+  localCorners.forEach((lc, idx)=>{
     const world = lc.clone().applyMatrix4(menuMesh.matrixWorld);
     const cm = menuMesh.userData.cornerMeshes[idx];
     cm.position.copy(world); cm.visible = menuMesh.visible;
   });
 }
-function handlePalmAndInteraction(){
+
+function handleHandsAndInteraction(){
   if(!handsLatest || !handsLatest.multiHandLandmarks || handsLatest.multiHandLandmarks.length===0){
-    scene3D.userData.palmLine.visible = false; scene3D.userData.pointerDot.visible = false; handSpheres.forEach(s=>s.visible=false); menuMesh.userData.cornerMeshes.forEach(c=>c.visible=false);
+    scene3D.userData.palmLine.visible = false;
+    scene3D.userData.pointerDot.visible = false;
+    handSpheres.forEach(s=>s.visible=false);
+    menuMesh.userData.cornerMeshes.forEach(c=>c.visible=false);
     [cornerTL,cornerTR,cornerBL,cornerBR].forEach(c=>{ c.classList.remove('active'); c.style.display='none'; });
     return;
   }
-  const landmarks = handsLatest.multiHandLandmarks[0];
-  const wristW = landmarkToWorld(landmarks[0]);
-  const palmNormal = computePalmNormal(landmarks);
-  if(palmNormal.z > 0) palmNormal.z *= -1;
-  const dir = palmNormal.clone().normalize();
-  const start = wristW.clone();
-  const end = start.clone().add(dir.clone().multiplyScalar(3.0));
-  scene3D.userData.palmLine.geometry.setFromPoints([start, end]); scene3D.userData.palmLine.visible = true;
 
-  // intersection with menu plane
+  // We'll use first detected hand
+  const lm = handsLatest.multiHandLandmarks[0];
+  // choose a reasonable depth for hand points in meters (1.0 by default)
+  const handDepth = 1.0; // meters in front of camera
+  // map important landmarks to world
+  const wristWorld = landmarkScreenToWorld(lm[0], perspectiveBase, handDepth);
+  const idxMcpWorld = landmarkScreenToWorld(lm[5], perspectiveBase, handDepth);
+  const pinkyMcpWorld = landmarkScreenToWorld(lm[17], perspectiveBase, handDepth);
+
+  // palm normal in world
+  const palmNormal = computePalmNormalWorld(wristWorld, idxMcpWorld, pinkyMcpWorld);
+  const dir = palmNormal.clone().normalize();
+
+  // beam start slightly in front of wrist
+  const beamStart = wristWorld.clone();
+  const beamEnd = beamStart.clone().add(dir.clone().multiplyScalar(3.0));
+  scene3D.userData.palmLine.geometry.setFromPoints([beamStart, beamEnd]);
+  scene3D.userData.palmLine.visible = true;
+
+  // pointer intersection with menu plane
   const planeNormal = new THREE.Vector3(0,0,1).applyQuaternion(menuMesh.quaternion);
   const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(planeNormal, menuMesh.position);
-  const ray = new THREE.Ray(start, dir);
-  const ip = new THREE.Vector3(); const hit = ray.intersectPlane(plane, ip);
-  if(hit){ scene3D.userData.pointerDot.position.copy(ip); scene3D.userData.pointerDot.visible = true; } else scene3D.userData.pointerDot.visible = false;
+  const ray = new THREE.Ray(beamStart, dir);
+  const ip = new THREE.Vector3();
+  const hit = ray.intersectPlane(plane, ip);
+  if(hit){
+    scene3D.userData.pointerDot.position.copy(ip); scene3D.userData.pointerDot.visible = true;
+  } else {
+    scene3D.userData.pointerDot.visible = false;
+  }
 
-  // show spheres
-  for(let i=0;i<21;i++){ if(landmarks[i]){ handSpheres[i].position.copy(landmarkToWorld(landmarks[i])); handSpheres[i].visible=true; } else handSpheres[i].visible=false; }
+  // show spheres for all landmarks (map each to world at handDepth)
+  for(let i=0;i<21;i++){
+    if(lm[i]){
+      const p = landmarkScreenToWorld(lm[i], perspectiveBase, handDepth);
+      handSpheres[i].position.copy(p);
+      handSpheres[i].visible = true;
+    } else handSpheres[i].visible = false;
+  }
 
+  // corner hover/hit detection
   updateCornerHandlesWorld();
+  let hovered = -1, minD=1.0;
+  menuMesh.userData.cornerMeshes.forEach((cm, idx)=>{
+    const d = cm.position.distanceTo(scene3D.userData.pointerDot.position);
+    if(d < 0.06 && d < minD){ minD = d; hovered = idx; }
+  });
 
-  // hovered corner detection
-  let hovered = -1; let minD = 1.0;
-  menuMesh.userData.cornerMeshes.forEach((cm, idx)=>{ const d = cm.position.distanceTo(scene3D.userData.pointerDot.position); if(d < 0.06 && d < minD){ minD = d; hovered = idx; } });
+  // reflect to small screen-space indicators (only when hovered)
+  [cornerTL,cornerTR,cornerBL,cornerBR].forEach((c, idx)=>{
+    if(idx===hovered){ c.style.display='block'; c.classList.add('active'); } else { c.style.display='none'; c.classList.remove('active'); }
+  });
 
-  // reflect to screen corner indicators (only show when hovered)
-  [cornerTL,cornerTR,cornerBL,cornerBR].forEach((c,idx)=>{ c.style.display = (idx===hovered)?'block':'none'; if(idx===hovered) c.classList.add('active'); else c.classList.remove('active'); });
-
-  // pinch start/stop
-  const pinching = isPinchingOneHand(landmarks);
-  if(pinching && !pinchActive){ pinchActive = true; if(hovered >= 0){ dragging=true; draggingCorner = hovered; menuStartPos.copy(menuMesh.position); menuStartScale.copy(menuMesh.scale); } else if(scene3D.userData.pointerDot.visible && scene3D.userData.pointerDot.distanceTo(menuMesh.position) < 0.6){ dragging=true; draggingCorner=-1; dragOffset.copy(menuMesh.position).sub(wristW); menuStartPos.copy(menuMesh.position); } }
-  else if(!pinching && pinchActive){ pinchActive=false; dragging=false; draggingCorner=-1; }
+  // pinch gestures
+  const pinching = isPinching(lm);
+  if(pinching && !pinchActive){
+    pinchActive = true;
+    if(hovered >= 0){
+      dragging = true; draggingCorner = hovered;
+      menuStartPos.copy(menuMesh.position); menuStartScale.copy(menuMesh.scale);
+    } else if(scene3D.userData.pointerDot.visible && scene3D.userData.pointerDot.distanceTo(menuMesh.position) < 0.6){
+      dragging = true; draggingCorner = -1;
+      dragOffset.copy(menuMesh.position).sub(wristWorld);
+      menuStartPos.copy(menuMesh.position);
+    }
+  } else if(!pinching && pinchActive){
+    pinchActive = false; dragging=false; draggingCorner=-1;
+  }
 
   if(dragging){
     if(draggingCorner === -1){
-      const newPos = wristW.clone().add(dragOffset);
+      const newPos = wristWorld.clone().add(dragOffset);
       const dist = newPos.length(); const clamped = Math.max(MENU_MIN_DISTANCE, Math.min(MENU_MAX_DISTANCE, dist));
       newPos.setLength(clamped);
       menuMesh.position.copy(newPos);
+      // face the user (camera origin)
       menuMesh.lookAt(new THREE.Vector3(0,0,0));
       updateCornerHandlesWorld();
       clampMenuWithinEyes();
     } else {
-      const palmLocal = scene3D.userData.pointerDot.position.clone().applyMatrix4(new THREE.Matrix4().getInverse(menuMesh.matrixWorld));
-      const sx = 1 + (Math.abs(palmLocal.x) / (menuMesh.geometry.parameters.width/2)) * 0.06;
-      const sy = 1 + (Math.abs(palmLocal.y) / (menuMesh.geometry.parameters.height/2)) * 0.06;
-      const factor = Math.max(0.5, Math.min(3.0, (sx+sy)/2));
+      // scale by distance of pointer in local menu space
+      const local = scene3D.userData.pointerDot.position.clone().applyMatrix4(new THREE.Matrix4().getInverse(menuMesh.matrixWorld));
+      const sx = 1 + (Math.abs(local.x) / (menuMesh.geometry.parameters.width/2)) * 0.06;
+      const sy = 1 + (Math.abs(local.y) / (menuMesh.geometry.parameters.height/2)) * 0.06;
+      const factor = Math.max(0.4, Math.min(3.0, (sx+sy)/2));
       menuMesh.scale.copy(menuStartScale.clone().multiplyScalar(factor));
       updateCornerHandlesWorld();
     }
   }
 }
 
-/* clamp menu to stay within combined eye area (simple) */
+/* ---------------------------
+   Keep menu inside combined eye windows
+   --------------------------- */
 function clampMenuWithinEyes(){
-  const cam = camLeft; cam.position.set(-0.032,0,0); cam.quaternion.copy(perspectiveBase.quaternion);
+  const cam = camLeft;
+  cam.position.set(-0.032,0,0); cam.quaternion.copy(perspectiveBase.quaternion);
   const ndc = menuMesh.position.clone().project(cam);
   const sx = (ndc.x*0.5+0.5)*window.innerWidth;
   const sy = (-ndc.y*0.5+0.5)*window.innerHeight;
-  const left = cachedView.leftX; const right = cachedView.rightX + cachedView.rightW; const top = cachedView.leftY; const bottom = cachedView.leftY + cachedView.leftH;
+  const left = cachedView.leftX; const right = cachedView.rightX + cachedView.rightW;
+  const top = cachedView.leftY; const bottom = cachedView.leftY + cachedView.leftH;
   const margin = 6;
   const cx = Math.max(left+margin, Math.min(right-margin, sx));
   const cy = Math.max(top+margin, Math.min(bottom-margin, sy));
-  const newNdcX = (cx / window.innerWidth - 0.5) * 2; const newNdcY = - (cy / window.innerHeight - 0.5) * 2;
-  const v = new THREE.Vector3(newNdcX, newNdcY, ndc.z); v.unproject(cam); menuMesh.position.copy(v);
+  const newNdcX = (cx / window.innerWidth - 0.5) * 2;
+  const newNdcY = - (cy / window.innerHeight - 0.5) * 2;
+  const v = new THREE.Vector3(newNdcX, newNdcY, ndc.z);
+  v.unproject(cam);
+  menuMesh.position.copy(v);
 }
 
-/* ============ Render loop ============ */
+/* ---------------------------
+   Render loop
+   --------------------------- */
 function animate(){
   requestAnimationFrame(animate);
 
-  // update device orientation
+  // update camera orientation
   if(deviceOrientationEnabled) perspectiveBase.quaternion.copy(deviceQuat);
   else perspectiveBase.quaternion.identity();
 
-  // ensure videoTexture updates if ready
+  // update video texture
   if(videoEl && videoEl.readyState >= videoEl.HAVE_ENOUGH_DATA && videoTexture) videoTexture.needsUpdate = true;
 
-  // call interactions
-  handlePalmAndInteraction();
+  // handle hands + interactions
+  handleHandsAndInteraction();
 
-  // stabilize menu apparent size (reduce stretching) by scaling relative to distance
-  if(menuMesh.visible){
-    const camPos = new THREE.Vector3(0,0,0).applyQuaternion(perspectiveBase.quaternion);
-    const dist = menuMesh.position.length(); // distance from origin
-    const factor = (MENU_DISTANCE / Math.max(0.0001, dist)); // scale so apparent size roughly constant
-    const base = 1.0;
-    // only apply modest correction to avoid unnatural scale
-    const corr = THREE.MathUtils.clamp(factor, 0.6, 1.8);
-    menuMesh.scale.set(corr*base, corr*base, corr*base);
-  }
-
+  // render per-eye video then 3D
   if(!sceneVideo || !sceneVideo.userData.plane) return;
   const plane = sceneVideo.userData.plane;
   orthoCam.left = 0; orthoCam.right = window.innerWidth; orthoCam.top = 0; orthoCam.bottom = window.innerHeight; orthoCam.updateProjectionMatrix();
@@ -381,7 +496,7 @@ function animate(){
   const v = cachedView;
   if(!v.leftW) computeViewports();
 
-  // left eye: video
+  // LEFT eye video
   plane.position.set(v.leftX + v.leftW/2, v.leftY + v.leftH/2, 0);
   plane.scale.set(v.leftW, v.leftH, 1);
   renderer.setScissorTest(true);
@@ -390,12 +505,13 @@ function animate(){
   renderer.clearDepth();
   renderer.render(sceneVideo, orthoCam);
 
-  // 3D left
-  const camL = camLeft; camL.position.set(-0.032,0,0); camL.quaternion.copy(perspectiveBase.quaternion); camL.updateMatrixWorld();
+  // LEFT eye 3D
+  const camL = camLeft;
+  camL.position.set(-0.032, 0, 0); camL.quaternion.copy(perspectiveBase.quaternion); camL.updateMatrixWorld();
   renderer.clearDepth();
   renderer.render(scene3D, camL);
 
-  // right eye: video
+  // RIGHT eye video
   plane.position.set(v.rightX + v.rightW/2, v.rightY + v.rightH/2, 0);
   plane.scale.set(v.rightW, v.rightH, 1);
   renderer.setScissor(v.rightX, window.innerHeight - v.rightY - v.rightH, v.rightW, v.rightH);
@@ -403,7 +519,7 @@ function animate(){
   renderer.clearDepth();
   renderer.render(sceneVideo, orthoCam);
 
-  // 3D right
+  // RIGHT eye 3D
   const camR = camRight; camR.position.set(0.032,0,0); camR.quaternion.copy(perspectiveBase.quaternion); camR.updateMatrixWorld();
   renderer.clearDepth();
   renderer.render(scene3D, camR);
@@ -411,26 +527,46 @@ function animate(){
   renderer.setScissorTest(false);
 }
 
-/* ============ UI interactions ============ */
+/* ---------------------------
+   UI interactions
+   --------------------------- */
 fullscreenBtn.addEventListener('click', ()=>{ if(!document.fullscreenElement) document.documentElement.requestFullscreen(); else document.exitFullscreen(); });
-fovSlider.addEventListener('input', (e)=>{ eyeScalePct = parseFloat(e.target.value); fovVal.textContent = Math.round(eyeScalePct) + '%'; computeViewports(); showUI(); });
+fovSlider.addEventListener('input', e=>{ eyeScalePct = parseFloat(e.target.value); fovVal.textContent = Math.round(eyeScalePct) + '%'; computeViewports(); showUI(); });
 
-// top tap to show UI & double-tap toggles menu
+// top tap restores UI; double-tap toggles menu
 document.body.addEventListener('pointerdown', (ev)=>{
   if(ev.clientY <= 140) showUI();
   const now = Date.now();
   if(now - lastTap < 300){
-    menuVisible = !menuVisible; menuMesh.visible = menuVisible;
-    if(menuVisible){ const forward = new THREE.Vector3(0,0,-1).applyQuaternion(perspectiveBase.quaternion); const pos = forward.clone().multiplyScalar(MENU_DISTANCE); menuMesh.position.copy(pos); menuMesh.lookAt(new THREE.Vector3(0,0,0)); }
+    menuVisible = !menuVisible;
+    menuMesh.visible = menuVisible;
+    if(menuVisible){
+      // spawn world-anchored menu at fixed direction + distance from user at time of spawn
+      // compute forward vector from device orientation and place menu there; but DO NOT update position each frame (world anchored)
+      const forward = new THREE.Vector3(0,0,-1).applyQuaternion(perspectiveBase.quaternion);
+      const worldPos = forward.clone().multiplyScalar(MENU_DISTANCE);
+      menuMesh.position.copy(worldPos);
+      // make it face toward user (origin)
+      menuMesh.lookAt(new THREE.Vector3(0,0,0));
+      // reset scale to default
+      menuMesh.scale.set(1,1,1);
+      // ensure corner handle world positions are set
+      if(menuMesh.userData.cornerMeshes) updateCornerHandlesWorld();
+    }
   }
   lastTap = now;
   resetUIHideTimer();
 });
 
-/* resize */
-function onWindowResize(){ if(!renderer) return; renderer.setSize(window.innerWidth, window.innerHeight); orthoCam.left = 0; orthoCam.right = window.innerWidth; orthoCam.top=0; orthoCam.bottom=window.innerHeight; orthoCam.updateProjectionMatrix(); computeViewports(); }
+/* ---------------------------
+   Window resize
+   --------------------------- */
+function onWindowResize(){ if(!renderer) return; renderer.setSize(window.innerWidth, window.innerHeight); orthoCam.left = 0; orthoCam.right = window.innerWidth; orthoCam.top = 0; orthoCam.bottom = window.innerHeight; orthoCam.updateProjectionMatrix(); computeViewports(); }
 window.addEventListener('resize', onWindowResize);
 
+/* ---------------------------
+   End
+   --------------------------- */
 </script>
 </body>
 </html>
