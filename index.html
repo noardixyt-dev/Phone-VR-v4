@@ -1,192 +1,174 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover" />
-<title>Mobile VR/AR Viewer</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover">
+<title>Mixed Reality Stereo VR Viewer</title>
 <style>
-html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#000;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial;color:#fff}
-#controls{position:absolute;top:10px;left:12px;display:flex;gap:10px;align-items:center;z-index:140;transition:opacity .32s,transform .32s;}
-#controls.hidden{opacity:0;pointer-events:none;transform:translateY(-8px);}
-.control{background:rgba(0,0,0,0.45);backdrop-filter:blur(6px);padding:8px;border-radius:8px;font-size:13px;color:#fff;}
+html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#000;color:#fff;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial}
+#controls{position:absolute;top:10px;left:12px;display:flex;gap:10px;align-items:center;transition:opacity .32s ease,transform .32s ease;z-index:200}
+#controls.hidden{opacity:0;pointer-events:none;transform:translateY(-8px)}
+.control{background:rgba(0,0,0,0.45);backdrop-filter:blur(6px);padding:8px;border-radius:8px;font-size:13px;color:#fff}
 #fovSlider{width:220px}
-#fullscreenBtn{position:absolute;top:10px;right:10px;padding:8px 12px;border-radius:8px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.06);color:#fff;font-size:14px;transition:opacity .32s,transform .32s;z-index:140}
-#fullscreenBtn.hidden{opacity:0;pointer-events:none;transform:translateY(-8px);}
-#startBtn{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);padding:14px 20px;border-radius:10px;background:#111;color:#fff;z-index:160;border:1px solid rgba(255,255,255,0.06);font-size:16px}
-#hint{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);font-size:12px;opacity:0.85;padding:6px 10px;border-radius:8px;background:rgba(0,0,0,0.35);z-index:130}
+#fullscreenBtn{position:absolute;top:10px;right:10px;padding:8px 12px;border-radius:8px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.06);color:#fff;font-size:14px;z-index:200;transition:opacity .32s ease,transform .32s ease}
+#startBtn{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);padding:14px 20px;border-radius:10px;background:#111;color:#fff;z-index:200;border:1px solid rgba(255,255,255,0.06);font-size:16px}
 #portraitOverlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.9);z-index:220;color:#fff;font-size:20px;padding:20px;text-align:center}
 .eye-outline{position:absolute;border-radius:6px;pointer-events:none;z-index:135;box-shadow:0 2px 8px rgba(0,0,0,0.6);border:1px solid rgba(255,255,255,0.04);transition:opacity .25s}
 .eye-outline.hidden{opacity:0}
 .eye-outline.show{opacity:1}
+.crosshair{position:absolute;width:20px;height:20px;border:2px solid #fff;border-radius:50%;pointer-events:none;z-index:150;transform:translate(-50%,-50%);opacity:0.6}
 </style>
 </head>
 <body>
-<div id="controls" class="hidden" style="display:none">
+
+<div id="controls" class="hidden">
   <div class="control">
     <div style="font-size:12px;margin-bottom:6px">FOV <span id="fovVal">70%</span></div>
-    <input id="fovSlider" type="range" min="40" max="100" value="70" />
+    <input id="fovSlider" type="range" min="40" max="100" value="70">
   </div>
 </div>
-<button id="fullscreenBtn" class="hidden" style="display:none">Fullscreen</button>
-<button id="startBtn">Start VR/AR</button>
-<div id="hint">Double-tap to toggle menu • Drag to move menu via palm</div>
-<div id="portraitOverlay" style="display:none">Please rotate your phone to landscape and grant camera & motion permission</div>
-<div id="leftOutline" class="eye-outline hidden" style="display:none"></div>
-<div id="rightOutline" class="eye-outline hidden" style="display:none"></div>
+<button id="fullscreenBtn" class="hidden">Fullscreen</button>
+<button id="startBtn">Start AR/VR</button>
+<div id="portraitOverlay" style="display:none">Please rotate to landscape and allow camera & motion</div>
+
+<div id="leftOutline" class="eye-outline hidden"></div>
+<div id="rightOutline" class="eye-outline hidden"></div>
+
+<div id="crossLeft" class="crosshair"></div>
+<div id="crossRight" class="crosshair"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/three@0.153.0/build/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 
 <script>
-/* ---------- UI ---------- */
-const startBtn = document.getElementById('startBtn');
-const controls = document.getElementById('controls');
-const fullscreenBtn = document.getElementById('fullscreenBtn');
-const fovSlider = document.getElementById('fovSlider');
-const fovVal = document.getElementById('fovVal');
-const hint = document.getElementById('hint');
-const portraitOverlay = document.getElementById('portraitOverlay');
-const leftOutline = document.getElementById('leftOutline');
-const rightOutline = document.getElementById('rightOutline');
+const startBtn=document.getElementById('startBtn');
+const controls=document.getElementById('controls');
+const fullscreenBtn=document.getElementById('fullscreenBtn');
+const fovSlider=document.getElementById('fovSlider');
+const fovVal=document.getElementById('fovVal');
+const portraitOverlay=document.getElementById('portraitOverlay');
+const leftOutline=document.getElementById('leftOutline');
+const rightOutline=document.getElementById('rightOutline');
+const crossLeft=document.getElementById('crossLeft');
+const crossRight=document.getElementById('crossRight');
 
-let uiVisible = true;
-let uiHideTimer = null;
-const UI_HIDE_MS = 10000;
+let uiVisible=true, uiHideTimer=null, UI_HIDE_MS=10000;
+function showUI(){uiVisible=true;controls.classList.remove('hidden');fullscreenBtn.classList.remove('hidden');resetUIHideTimer();}
+function hideUI(){uiVisible=false;controls.classList.add('hidden');fullscreenBtn.classList.add('hidden');}
+function resetUIHideTimer(){if(uiHideTimer)clearTimeout(uiHideTimer);uiHideTimer=setTimeout(hideUI,UI_HIDE_MS);}
+window.addEventListener('pointermove',()=>resetUIHideTimer(),{passive:true});
+controls.addEventListener('pointerdown',()=>showUI());
 
-function showUI(){
-  uiVisible = true;
-  controls.style.display='flex'; controls.classList.remove('hidden');
-  fullscreenBtn.style.display='block'; fullscreenBtn.classList.remove('hidden');
-  leftOutline.classList.remove('hidden'); leftOutline.classList.add('show');
-  rightOutline.classList.remove('hidden'); rightOutline.classList.add('show');
-  resetUIHideTimer();
+let renderer,scene3D,sceneVideo,camLeft,camRight,video,videoTexture;
+let perspectiveBase;
+let menuMesh,cursorMesh;
+let interactiveObjects=[],raycaster=new THREE.Raycaster();
+let pointerNDC=new THREE.Vector2(0,0);
+let INTERSECTED=null;
+let menuVisible=false,lastTap=0;
+let eyeScalePct=parseFloat(fovSlider.value);
+fovVal.textContent=Math.round(eyeScalePct)+'%';
+
+const MENU_DISTANCE=1.0; // closer to user
+const FIXED_IPD=0.064;
+
+// Device orientation
+let deviceQuat=new THREE.Quaternion();
+let deviceOrientationEnabled=false;
+const euler=new THREE.Euler();
+function getScreenOrientationDeg(){return screen.orientation?.angle||window.orientation||0;}
+function setObjectQuaternionFromSensor(quatOut,alpha,beta,gamma){
+  const orient=getScreenOrientationDeg(), degToRad=Math.PI/180;
+  euler.set((beta||0)*degToRad,(alpha||0)*degToRad,-(gamma||0)*degToRad,'YXZ');
+  quatOut.setFromEuler(euler);
+  quatOut.z=0;
 }
-function hideUI(){
-  uiVisible = false;
-  controls.classList.add('hidden'); fullscreenBtn.classList.add('hidden');
-  leftOutline.classList.remove('show'); leftOutline.classList.add('hidden');
-  rightOutline.classList.remove('show'); rightOutline.classList.add('hidden');
+async function enableDeviceOrientation(){
+  window.addEventListener('deviceorientation',ev=>{deviceOrientationEnabled=true;setObjectQuaternionFromSensor(deviceQuat,ev.alpha,ev.beta,ev.gamma);},true);
 }
-function resetUIHideTimer(){
-  if(uiHideTimer) clearTimeout(uiHideTimer);
-  uiHideTimer = setTimeout(() => { hideUI(); }, UI_HIDE_MS);
-}
-window.addEventListener('pointermove',()=>{ resetUIHideTimer(); }, {passive:true});
-controls.addEventListener('pointerdown',()=>{ showUI(); });
 
-/* ---------- State ---------- */
-let renderer, scene3D, sceneVideo;
-let perspectiveBase, camLeft, camRight;
-let video, videoTexture;
-let menuMesh;
-let handMarkers = [];
-let menuVisible=false;
-let lastTap=0;
+// -------------------- Start AR/VR --------------------
+startBtn.addEventListener('click',async()=>{
+  try{if(document.documentElement.requestFullscreen)await document.documentElement.requestFullscreen();}catch(e){}
+  await enableDeviceOrientation();
+  startBtn.style.display='none';
+  showUI();
 
-let eyeScalePct = parseFloat(fovSlider.value);
-fovVal.textContent = Math.round(eyeScalePct)+'%';
+  // Video setup
+  video=document.createElement('video');video.setAttribute('playsinline','');video.autoplay=true;video.muted=true;document.body.appendChild(video);
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:1920,height:1080},audio:false});
+    video.srcObject=stream;
+    await video.play();
+    initRendererAndScenes();
+    initHandTracking();
+  }catch(err){alert('Camera access failed: '+(err.message||err));startBtn.style.display='block';}
+});
 
-/* ---------- Renderer & Scenes ---------- */
-let rtLeft, rtRight;
-let cachedView={};
+fullscreenBtn.addEventListener('click',()=>{if(!document.fullscreenElement)document.documentElement.requestFullscreen();else document.exitFullscreen();});
+fovSlider.addEventListener('input',()=>{eyeScalePct=parseFloat(fovSlider.value);fovVal.textContent=Math.round(eyeScalePct)+'%';computeViewports();showUI();});
 
+// -------------------- Renderer & Scenes --------------------
+let rtLeft,rtRight;
 function initRendererAndScenes(){
-  renderer = new THREE.WebGLRenderer({antialias:true});
+  renderer=new THREE.WebGLRenderer({antialias:true});
   renderer.setPixelRatio(window.devicePixelRatio||1);
   renderer.setSize(window.innerWidth,window.innerHeight);
-  renderer.autoClear=false; 
-  document.body.appendChild(renderer.domElement);
+  renderer.autoClear=false;document.body.appendChild(renderer.domElement);
 
-  /* Video Scene */
-  sceneVideo = new THREE.Scene();
-  const vGeom = new THREE.PlaneGeometry(2,2);
-  videoTexture = new THREE.VideoTexture(video);
-  videoTexture.minFilter = videoTexture.magFilter = THREE.LinearFilter;
-  const vMat = new THREE.MeshBasicMaterial({map:videoTexture});
-  const vMesh = new THREE.Mesh(vGeom,vMat); 
-  sceneVideo.add(vMesh);
+  sceneVideo=new THREE.Scene();
+  videoTexture=new THREE.VideoTexture(video);
+  videoTexture.minFilter=videoTexture.magFilter=THREE.LinearFilter;
+  const videoMat=new THREE.MeshBasicMaterial({map:videoTexture});
+  const videoGeom=new THREE.PlaneGeometry(2,2);
+  const videoMesh=new THREE.Mesh(videoGeom,videoMat);
+  sceneVideo.add(videoMesh);
 
-  /* 3D Scene */
-  scene3D = new THREE.Scene();
+  scene3D=new THREE.Scene();
   scene3D.add(new THREE.AmbientLight(0xffffff,0.6));
-  const dl = new THREE.DirectionalLight(0xffffff,0.5); dl.position.set(1,2,2); scene3D.add(dl);
+  const dl=new THREE.DirectionalLight(0xffffff,0.5);dl.position.set(1,2,2);scene3D.add(dl);
 
-  perspectiveBase = new THREE.PerspectiveCamera(70,window.innerWidth/window.innerHeight,0.01,1000);
-  camLeft = perspectiveBase.clone();
-  camRight = perspectiveBase.clone();
+  perspectiveBase=new THREE.PerspectiveCamera(70,window.innerWidth/window.innerHeight,0.01,1000);
+  camLeft=perspectiveBase.clone();camRight=perspectiveBase.clone();
 
-  /* Menu */
-  const boxG = new THREE.BoxGeometry(0.45,0.22,0.04);
-  const boxM = new THREE.MeshStandardMaterial({color:0x2f7fff,roughness:0.5,metalness:0.1});
-  menuMesh = new THREE.Mesh(boxG,boxM);
-  menuMesh.visible=false;
-  scene3D.add(menuMesh);
+  // Menu
+  const boxG=new THREE.BoxGeometry(0.4,0.2,0.02);
+  const boxM=new THREE.MeshStandardMaterial({color:0x2f7fff,roughness:0.5,metalness:0.1});
+  menuMesh=new THREE.Mesh(boxG,boxM);
+  menuMesh.visible=false;scene3D.add(menuMesh);interactiveObjects.push(menuMesh);
 
-  /* Hand markers */
-  for(let i=0;i<21;i++){
-    const s = new THREE.Mesh(new THREE.SphereGeometry(0.015,8,8),new THREE.MeshBasicMaterial({color:0xff0000}));
-    scene3D.add(s);
-    handMarkers.push(s);
-  }
+  // Cursor
+  const ringG=new THREE.RingGeometry(0.01,0.02,32);
+  const ringM=new THREE.MeshBasicMaterial({color:0xffffff,side:THREE.DoubleSide});
+  cursorMesh=new THREE.Mesh(ringG,ringM);cursorMesh.visible=false;scene3D.add(cursorMesh);
 
-  /* Render Targets */
-  const rtParams={minFilter:THREE.LinearFilter, magFilter:THREE.LinearFilter, format:THREE.RGBAFormat};
-  rtLeft = new THREE.WebGLRenderTarget(1024,1024,rtParams);
-  rtRight = new THREE.WebGLRenderTarget(1024,1024,rtParams);
-
-  computeViewports();
-  onWindowResize();
-  window.addEventListener('resize',onWindowResize);
-
-  /* Double-tap menu */
-  window.addEventListener('pointerdown',(ev)=>{
-    const now = Date.now();
-    if(now - lastTap < 300){
-      menuVisible = !menuVisible;
-      if(menuVisible){
-        const camPos = new THREE.Vector3().setFromMatrixPosition(perspectiveBase.matrixWorld);
-        const camDir = new THREE.Vector3(0,0,-1).applyQuaternion(perspectiveBase.quaternion);
-        menuMesh.position.copy(camPos.clone().add(camDir.multiplyScalar(1.0)));
-        menuMesh.visible = true;
-      }else{
-        menuMesh.visible = false;
-      }
-    }
-    lastTap = now;
-    resetUIHideTimer();
-  });
-
+  computeViewports();window.addEventListener('resize',computeViewports);
   animate();
 }
 
-/* ---------- Eye windows ---------- */
+// -------------------- Eye windows --------------------
+let cachedView={};
 function computeViewports(){
   const bottomPadding=10;
-  const scale = Math.max(0.4, Math.min(1.0, eyeScalePct/100));
-  const eyeH = Math.floor(window.innerHeight*scale);
+  const scale=Math.max(0.4,Math.min(1.0,eyeScalePct/100));
+  const eyeH=Math.floor(window.innerHeight*scale);
   const videoAspect=(video.videoWidth/video.videoHeight)||16/9;
-  const eyeW = Math.floor(eyeH*videoAspect);
+  const eyeW=Math.floor(eyeH*videoAspect);
   const gap=Math.max(6,Math.floor(eyeW*0.08));
-  const totalW = eyeW*2 + gap;
-  const leftX = Math.floor((window.innerWidth-totalW)/2);
-  const topY = window.innerHeight - bottomPadding - eyeH;
+  const totalW=eyeW*2+gap;
+  const leftX=Math.floor((window.innerWidth-totalW)/2);
+  const topY=window.innerHeight-bottomPadding-eyeH; // bottom is fixed
   cachedView={leftX,leftY:topY,leftW:eyeW,leftH:eyeH,rightX:leftX+eyeW+gap,rightY:topY,rightW:eyeW,rightH:eyeH,gap};
-  leftOutline.style.left = cachedView.leftX+'px'; leftOutline.style.top = cachedView.leftY+'px';
-  leftOutline.style.width = cachedView.leftW+'px'; leftOutline.style.height = cachedView.leftH+'px';
-  rightOutline.style.left = cachedView.rightX+'px'; rightOutline.style.top = cachedView.rightY+'px';
-  rightOutline.style.width = cachedView.rightW+'px'; rightOutline.style.height = cachedView.rightH+'px';
+  leftOutline.style.left=cachedView.leftX+'px'; leftOutline.style.top=cachedView.leftY+'px';
+  leftOutline.style.width=cachedView.leftW+'px'; leftOutline.style.height=cachedView.leftH+'px';
+  rightOutline.style.left=cachedView.rightX+'px'; rightOutline.style.top=cachedView.rightY+'px';
+  rightOutline.style.width=cachedView.rightW+'px'; rightOutline.style.height=cachedView.rightH+'px';
+  crossLeft.style.left=cachedView.leftX+cachedView.leftW/2+'px'; crossLeft.style.top=cachedView.leftY+cachedView.leftH/2+'px';
+  crossRight.style.left=cachedView.rightX+cachedView.rightW/2+'px'; crossRight.style.top=cachedView.rightY+cachedView.rightH/2+'px';
 }
 
-/* ---------- Resize ---------- */
-function onWindowResize(){
-  if(!renderer) return;
-  renderer.setSize(window.innerWidth,window.innerHeight);
-  if(perspectiveBase){perspectiveBase.aspect=window.innerWidth/window.innerHeight; perspectiveBase.updateProjectionMatrix();}
-  computeViewports();
-}
-
-/* ---------- Animate ---------- */
+// -------------------- Animation --------------------
 function animate(){
   requestAnimationFrame(animate);
   if(renderer){
@@ -196,47 +178,46 @@ function animate(){
   }
 }
 
-/* ---------- Start Camera & Hand Tracking ---------- */
-startBtn.addEventListener('click',async()=>{
-  startBtn.style.display='none';
-  showUI();
+// -------------------- Hand Tracking --------------------
+let hands, cameraFeed, handSpheres=[];
+function initHandTracking(){
+  hands=new Hands({locateFile:(file)=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+  hands.setOptions({maxNumHands:2,modelComplexity:1,minDetectionConfidence:0.7,minTrackingConfidence:0.7});
+  hands.onResults(onHandsResults);
+  cameraFeed=new Camera(video,{onFrame:async()=>{await hands.send({image:video});},width:1280,height:720});
+  cameraFeed.start();
+}
 
-  video=document.createElement('video'); 
-  video.setAttribute('playsinline',''); video.autoplay=true; video.muted=true;
-  document.body.appendChild(video);
-
-  const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'},audio:false});
-  video.srcObject = stream;
-  await video.play();
-
-  const hands = new Hands({locateFile:(file)=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
-  hands.setOptions({maxNumHands:2,modelComplexity:1, minDetectionConfidence:0.7, minTrackingConfidence:0.7});
-  hands.onResults(results=>{
-    for(let i=0;i<21;i++){
-      if(results.multiHandLandmarks.length>0){
-        let l = results.multiHandLandmarks[0][i];
-        handMarkers[i].position.set((l.x-0.5)*2,(0.5-l.y)*2,-l.z*0.5);
-        handMarkers[i].visible=true;
-      } else { handMarkers[i].visible=false; }
+function onHandsResults(results){
+  while(handSpheres.length>0){scene3D.remove(handSpheres.pop());}
+  if(results.multiHandLandmarks){
+    for(const landmarks of results.multiHandLandmarks){
+      for(const lm of landmarks){
+        const sphere=new THREE.Mesh(new THREE.SphereGeometry(0.01,8,8),new THREE.MeshBasicMaterial({color:0xff0000}));
+        sphere.position.set((lm.x-0.5)*0.6,(-lm.y+0.5)*0.6,(lm.z-0.5)*0.6);
+        scene3D.add(sphere); handSpheres.push(sphere);
+      }
     }
-  });
+  }
+}
 
-  const cameraMP = new Camera(video,{onFrame:()=>hands.send({image:video}),width:1280,height:720});
-  cameraMP.start();
-
-  initRendererAndScenes();
+// -------------------- Menu double-tap --------------------
+window.addEventListener('pointerdown',(ev)=>{
+  const now=Date.now();
+  if(now-lastTap<300){
+    menuVisible=!menuVisible;
+    menuMesh.visible=menuVisible;
+    cursorMesh.visible=menuVisible;
+    if(menuVisible){
+      const camPos=new THREE.Vector3().setFromMatrixPosition(perspectiveBase.matrixWorld);
+      const camDir=new THREE.Vector3(0,0,-1).applyQuaternion(perspectiveBase.quaternion);
+      menuMesh.position.copy(camPos.clone().add(camDir.multiplyScalar(MENU_DISTANCE)));
+      menuMesh.lookAt(camPos);
+    }
+  }
+  lastTap=now; resetUIHideTimer();
 });
 
-/* ---------- FOV Slider ---------- */
-fovSlider.addEventListener('input',()=>{
-  eyeScalePct=parseFloat(fovSlider.value);
-  fovVal.textContent=Math.round(eyeScalePct)+'%';
-  onWindowResize();
-  showUI();
-});
-
-/* ---------- Fullscreen ---------- */
-fullscreenBtn.addEventListener('click',()=>{if(!document.fullscreenElement)document.documentElement.requestFullscreen(); else document.exitFullscreen();});
 </script>
 </body>
 </html>
