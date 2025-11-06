@@ -1,12 +1,13 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover"/>
-<title>Stereo VR — Rear passthrough (no-menu)</title>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover" />
+<title>Stereo VR — Rebuilt Passthrough (fresh)</title>
 <style>
   :root{--ui-bg:rgba(0,0,0,0.45);--outline:rgba(255,255,255,0.06)}
   html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#000;color:#fff;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial}
+  /* Controls */
   #controls{position:absolute;z-index:220;top:10px;left:12px;display:flex;gap:10px;align-items:center;transition:opacity .32s ease,transform .32s ease}
   #controls.hidden{opacity:0;pointer-events:none;transform:translateY(-8px)}
   .control{background:var(--ui-bg);backdrop-filter:blur(6px);padding:8px;border-radius:8px;font-size:13px;color:#fff}
@@ -14,11 +15,9 @@
   #fullscreenBtn{position:absolute;top:10px;right:10px;z-index:220;padding:8px 12px;border-radius:8px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.06);color:#fff;font-size:14px;transition:opacity .32s}
   #fullscreenBtn.hidden{opacity:0;pointer-events:none;transform:translateY(-8px)}
   #startBtn{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);padding:14px 20px;border-radius:10px;background:#111;color:#fff;z-index:320;border:1px solid rgba(255,255,255,0.06);font-size:16px}
-  #hint{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);font-size:12px;opacity:0.9;padding:6px 10px;border-radius:8px;background:rgba(0,0,0,0.35);z-index:210}
+  #hint{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);font-size:12px;opacity:0.95;padding:6px 10px;border-radius:8px;background:rgba(0,0,0,0.35);z-index:210}
   .eye-outline{position:absolute;border-radius:14px;pointer-events:none;z-index:200;box-shadow:0 6px 18px rgba(0,0,0,0.45);border:2px solid var(--outline);transition:opacity .25s}
-  .eye-outline.hidden{opacity:0}
-  .eye-outline.show{opacity:1}
-  #portraitOverlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.92);z-index:9999;color:#fff;font-size:18px;padding:24px;text-align:center}
+  #portraitOverlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.9);z-index:9999;color:#fff;font-size:18px;padding:24px;text-align:center}
   canvas{display:block;width:100%;height:100%}
 </style>
 </head>
@@ -37,17 +36,11 @@
   <div id="leftOutline" class="eye-outline" style="display:none"></div>
   <div id="rightOutline" class="eye-outline" style="display:none"></div>
 
-  <div id="portraitOverlay">Please rotate your device to landscape and grant camera & motion permission.</div>
+  <div id="portraitOverlay">Please rotate your device to landscape.</div>
 
   <script src="https://cdn.jsdelivr.net/npm/three@0.153.0/build/three.min.js"></script>
 <script>
-/* Stereo VR passthrough (rear camera), no menu.
-   - Rear camera attempted via deviceId list, then facingMode fallbacks.
-   - Camera rendered into video texture used as background in each eye window (center-cropped).
-   - Eye windows are 1.5:1, vertically centered; FOV slider scales windows and scene.
-   - Top UI auto-hide after 10s; tap-top reveals again.
-   - Device orientation used (roll removed) for stable world rotation.
-*/
+/* Fresh rebuild of stereo passthrough */
 
 const startBtn = document.getElementById('startBtn');
 const controls = document.getElementById('controls');
@@ -57,6 +50,7 @@ const fovVal = document.getElementById('fovVal');
 const leftOutline = document.getElementById('leftOutline');
 const rightOutline = document.getElementById('rightOutline');
 const portraitOverlay = document.getElementById('portraitOverlay');
+const hint = document.getElementById('hint');
 
 let uiHideTimer = null;
 const UI_HIDE_MS = 10000;
@@ -66,7 +60,7 @@ function resetUIHideTimer(){ if(uiHideTimer) clearTimeout(uiHideTimer); uiHideTi
 window.addEventListener('pointermove', ()=> resetUIHideTimer(), { passive:true });
 controls.addEventListener('pointerdown', ()=> showUI());
 
-/* state */
+/* App state */
 let renderer, sceneVideo, scene3D, orthoCam;
 let perspectiveBase, camLeft, camRight;
 let videoEl, videoTexture;
@@ -75,9 +69,8 @@ let eyeScalePct = parseFloat(fovSlider.value);
 fovVal.textContent = Math.round(eyeScalePct) + '%';
 
 const FIXED_IPD = 0.064;
-const MENU_DISTANCE = 1.4;
 
-/* orientation (landscape-calibrated + remove roll) */
+/* Orientation helpers */
 const zee = new THREE.Vector3(0,0,1);
 const euler = new THREE.Euler();
 const qPortraitToThree = new THREE.Quaternion(-Math.sqrt(0.5),0,0,Math.sqrt(0.5));
@@ -86,31 +79,28 @@ let deviceOrientationEnabled = false;
 
 function getScreenOrientationDeg(){ if(screen && screen.orientation && typeof screen.orientation.angle === 'number') return screen.orientation.angle; return window.orientation || 0; }
 
-function setObjectQuaternionFromSensor(quatOut, alpha, beta, gamma){
+function setObjectQuaternionFromSensor(q, alpha, beta, gamma){
   const orient = getScreenOrientationDeg();
-  const deg = Math.PI/180;
-  euler.set((beta||0)*deg, (alpha||0)*deg, -(gamma||0)*deg, 'YXZ');
-  quatOut.setFromEuler(euler);
-  let baseRot = new THREE.Quaternion();
-  if(orient === 90) baseRot.setFromAxisAngle(zee, -Math.PI/2);
-  else if(orient === -90 || orient === 270) baseRot.setFromAxisAngle(zee, Math.PI/2);
-  else if(orient === 180) baseRot.setFromAxisAngle(zee, Math.PI);
-  quatOut.multiply(qPortraitToThree);
-  quatOut.multiply(baseRot);
-  const ex = new THREE.Euler().setFromQuaternion(quatOut, 'YXZ');
-  ex.z = 0; // remove roll
-  quatOut.setFromEuler(ex);
+  const d = Math.PI/180;
+  euler.set((beta||0)*d, (alpha||0)*d, -(gamma||0)*d, 'YXZ');
+  q.setFromEuler(euler);
+  let base = new THREE.Quaternion();
+  if(orient === 90) base.setFromAxisAngle(zee, -Math.PI/2);
+  else if(orient === -90 || orient === 270) base.setFromAxisAngle(zee, Math.PI/2);
+  else if(orient === 180) base.setFromAxisAngle(zee, Math.PI);
+  q.multiply(qPortraitToThree);
+  q.multiply(base);
+  const ex = new THREE.Euler().setFromQuaternion(q, 'YXZ');
+  ex.z = 0;
+  q.setFromEuler(ex);
 }
 
 async function enableDeviceOrientation(){
   if(typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function'){
     try{
-      const perm = await DeviceOrientationEvent.requestPermission();
-      if(perm === 'granted'){
-        window.addEventListener('deviceorientation', ev => { deviceOrientationEnabled = true; setObjectQuaternionFromSensor(deviceQuat, ev.alpha, ev.beta, ev.gamma); }, true);
-      } else {
-        window.addEventListener('deviceorientation', ev => { deviceOrientationEnabled = true; setObjectQuaternionFromSensor(deviceQuat, ev.alpha, ev.beta, ev.gamma); }, true);
-      }
+      const p = await DeviceOrientationEvent.requestPermission();
+      if(p === 'granted') window.addEventListener('deviceorientation', ev => { deviceOrientationEnabled = true; setObjectQuaternionFromSensor(deviceQuat, ev.alpha, ev.beta, ev.gamma); }, true);
+      else window.addEventListener('deviceorientation', ev => { deviceOrientationEnabled = true; setObjectQuaternionFromSensor(deviceQuat, ev.alpha, ev.beta, ev.gamma); }, true);
     }catch(e){
       window.addEventListener('deviceorientation', ev => { deviceOrientationEnabled = true; setObjectQuaternionFromSensor(deviceQuat, ev.alpha, ev.beta, ev.gamma); }, true);
     }
@@ -119,69 +109,62 @@ async function enableDeviceOrientation(){
   }
 }
 
-/* camera selection */
-async function enumerateRearCandidates(){
+/* Camera selection rebuilt from scratch */
+async function enumerateVideoInputs(){
   try{
     const devices = await navigator.mediaDevices.enumerateDevices();
-    const cams = devices.filter(d => d.kind === 'videoinput');
-    const keywords = ['back','rear','environment','main','wide'];
-    const ordered = [];
-    for(const kw of keywords){
-      for(const c of cams){
-        if((c.label || '').toLowerCase().includes(kw) && !ordered.includes(c.deviceId)) ordered.push(c.deviceId);
-      }
-    }
-    for(const c of cams){
-      if(!ordered.includes(c.deviceId)) ordered.push(c.deviceId);
-    }
-    return ordered;
-  }catch(e){
-    return [];
-  }
+    return devices.filter(d => d.kind === 'videoinput');
+  }catch(e){ return []; }
 }
 
-async function requestRearStream(){
-  const ids = await enumerateRearCandidates();
+async function chooseRearDeviceId(){
+  try{
+    const cams = await enumerateVideoInputs();
+    const prefer = ['back','rear','environment','main','wide'];
+    // look for labels (may be empty until permission granted)
+    for(const kw of prefer){
+      for(const c of cams){
+        if((c.label||'').toLowerCase().includes(kw)) return c.deviceId;
+      }
+    }
+    // fallback: return first non-front if possible
+    for(const c of cams){
+      const lab = (c.label||'').toLowerCase();
+      if(!(lab.includes('front') || lab.includes('selfie'))) return c.deviceId;
+    }
+    return cams.length ? cams[0].deviceId : null;
+  }catch(e){ return null; }
+}
+
+async function getRearStreamFresh(){
+  // device list attempts (try highest to lower resolutions)
+  const deviceId = await chooseRearDeviceId();
   const sizes = [{w:3840,h:2160},{w:1920,h:1080},{w:1280,h:720}];
-  // try deviceId exact
-  for(const id of ids){
+  if(deviceId){
     for(const s of sizes){
       try{
-        const c = { video: { deviceId: { exact: id }, width: { ideal: s.w }, height: { ideal: s.h } }, audio: false };
-        const stream = await navigator.mediaDevices.getUserMedia(c);
-        return { stream, info: `device ${id} ${s.w}x${s.h}` };
+        const constraints = { video: { deviceId: { exact: deviceId }, width:{ ideal: s.w }, height:{ ideal: s.h } }, audio:false };
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        return stream;
       }catch(e){}
     }
   }
-  // try facingMode fallbacks
+  // facingMode fallbacks
   const attempts = [
-    { video: { facingMode: { exact: 'environment' }, width:{ ideal:3840 }, height:{ ideal:2160 } }, audio:false },
-    { video: { facingMode: { ideal: 'environment' }, width:{ ideal:1920 }, height:{ ideal:1080 } }, audio:false },
-    { video: true, audio: false }
+    { video:{ facingMode:{ exact:'environment' }, width:{ ideal:3840 }, height:{ ideal:2160 } }, audio:false },
+    { video:{ facingMode:{ ideal:'environment' }, width:{ ideal:1920 }, height:{ ideal:1080 } }, audio:false },
+    { video:true, audio:false }
   ];
-  for(const a of attempts){
+  for(const c of attempts){
     try{
-      const stream = await navigator.mediaDevices.getUserMedia(a);
-      return { stream, info: `facingMode fallback` };
+      const s = await navigator.mediaDevices.getUserMedia(c);
+      return s;
     }catch(e){}
   }
   throw new Error('camera unavailable or permission denied');
 }
 
-/* helper to guess if track looks like front-facing */
-function looksLikeFront(track){
-  try{
-    if(!track) return false;
-    if(typeof track.getSettings === 'function'){
-      const s = track.getSettings();
-      if(s.facingMode) return s.facingMode === 'user';
-    }
-    const lab = (track.label || '').toLowerCase();
-    return lab.includes('front') || lab.includes('selfie');
-  }catch(e){ return false; }
-}
-
-/* Start button */
+/* Start button flow */
 let starting = false;
 startBtn.addEventListener('click', async ()=>{
   if(starting) return;
@@ -195,27 +178,19 @@ startBtn.addEventListener('click', async ()=>{
   await enableDeviceOrientation();
   showUI();
   try{
-    const res = await requestRearStream();
-    const stream = res.stream;
-    // create hidden video element (visible only via WebGL)
+    const stream = await getRearStreamFresh();
     if(!videoEl){
       videoEl = document.createElement('video');
-      videoEl.setAttribute('playsinline', '');
-      videoEl.autoplay = true;
+      videoEl.setAttribute('playsinline','');
       videoEl.muted = true;
-      videoEl.style.position = 'fixed';
-      videoEl.style.left = '0';
-      videoEl.style.top = '0';
-      videoEl.style.width = '1px';
-      videoEl.style.height = '1px';
-      videoEl.style.opacity = '0';
-      videoEl.style.pointerEvents = 'none';
+      videoEl.autoplay = true;
+      videoEl.style.position='fixed';
+      videoEl.style.left='0'; videoEl.style.top='0'; videoEl.style.width='1px'; videoEl.style.height='1px'; videoEl.style.opacity='0'; videoEl.style.pointerEvents='none';
       document.body.appendChild(videoEl);
     }
     videoEl.srcObject = stream;
-    try { await videoEl.play(); } catch(e){ /* ignore; texture updates when frames arrive */ }
-    const mirrored = looksLikeFront(stream.getVideoTracks()[0]);
-    initRendererAndScenes(mirrored);
+    try { await videoEl.play(); } catch(e){ /* play may be delayed */ }
+    initRendererAndScenes();
     startBtn.style.display = 'none';
   }catch(err){
     alert('Camera start failed: ' + (err && err.message ? err.message : err));
@@ -225,15 +200,16 @@ startBtn.addEventListener('click', async ()=>{
   }
 });
 
-/* portrait overlay handling */
-function checkPortrait(){ if(window.innerWidth < window.innerHeight) portraitOverlay.style.display = 'flex'; else portraitOverlay.style.display = 'none'; }
+/* Portrait handling */
+function checkPortrait(){ if(window.innerWidth < window.innerHeight) portraitOverlay.style.display='flex'; else portraitOverlay.style.display='none'; }
 window.addEventListener('resize', checkPortrait);
 window.addEventListener('orientationchange', ()=> setTimeout(checkPortrait, 200));
 checkPortrait();
 
-/* Renderer & scenes (no menu) */
-function initRendererAndScenes(mirrored=false){
+/* Renderer & scenes FROM SCRATCH */
+function initRendererAndScenes(){
   if(renderer) return;
+
   renderer = new THREE.WebGLRenderer({ antialias:true });
   renderer.setPixelRatio(window.devicePixelRatio || 1);
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -250,11 +226,12 @@ function initRendererAndScenes(mirrored=false){
   videoTexture.wrapS = THREE.ClampToEdgeWrapping;
   videoTexture.wrapT = THREE.ClampToEdgeWrapping;
 
+  // small shader: center-crop 16:9 to target aspect (1.5)
   const uniforms = {
     map: { value: videoTexture },
-    videoAspect: { value: 16/9 },
+    videoAspect: { value: (videoEl.videoWidth && videoEl.videoHeight) ? videoEl.videoWidth / videoEl.videoHeight : (16/9) },
     targetAspect: { value: 1.5 },
-    flipX: { value: mirrored ? 1.0 : 0.0 }
+    flipX: { value: 0.0 }
   };
 
   const videoMat = new THREE.ShaderMaterial({
@@ -270,8 +247,8 @@ function initRendererAndScenes(mirrored=false){
         vec2 uv = vUv;
         float va = videoAspect;
         float ta = targetAspect;
-        float sU = 1.0, sV = 1.0;
-        if(va > ta){ sU = ta / va; sV = 1.0; } else { sU = 1.0; sV = va / ta; }
+        float sU=1.0, sV=1.0;
+        if(va > ta){ sU = ta/va; sV = 1.0; } else { sU = 1.0; sV = va/ta; }
         vec2 scaled = (uv - 0.5) / vec2(sU, sV) + 0.5;
         if(flipX > 0.5) scaled.x = 1.0 - scaled.x;
         if(scaled.x < 0.0 || scaled.x > 1.0 || scaled.y < 0.0 || scaled.y > 1.0) gl_FragColor = vec4(0.0,0.0,0.0,1.0);
@@ -281,22 +258,21 @@ function initRendererAndScenes(mirrored=false){
     depthTest:false, depthWrite:false
   });
 
-  const planeGeo = new THREE.PlaneGeometry(1,1);
-  const planeMesh = new THREE.Mesh(planeGeo, videoMat);
-  sceneVideo.add(planeMesh);
-  sceneVideo.userData.plane = planeMesh;
+  const plane = new THREE.Mesh(new THREE.PlaneGeometry(1,1), videoMat);
+  sceneVideo.add(plane);
+  sceneVideo.userData.plane = plane;
   sceneVideo.userData.mat = videoMat;
 
-  // 3D scene (empty — you can add future objects)
+  // 3D scene (empty baseline so we can validate layering)
   scene3D = new THREE.Scene();
   scene3D.add(new THREE.AmbientLight(0xffffff, 0.8));
-  const dl = new THREE.DirectionalLight(0xffffff, 0.25); dl.position.set(1,2,2); scene3D.add(dl);
+  const dl = new THREE.DirectionalLight(0xffffff, 0.2); dl.position.set(1,2,2); scene3D.add(dl);
 
   perspectiveBase = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 1000);
   camLeft = perspectiveBase.clone();
   camRight = perspectiveBase.clone();
 
-  // update videoAspect when metadata becomes available
+  // when video metadata arrives, update videoAspect uniform, compute viewports
   videoEl.addEventListener('loadedmetadata', ()=> {
     if(videoEl.videoWidth && videoEl.videoHeight){
       sceneVideo.userData.mat.uniforms.videoAspect.value = videoEl.videoWidth / videoEl.videoHeight;
@@ -309,12 +285,12 @@ function initRendererAndScenes(mirrored=false){
   window.addEventListener('resize', onWindowResize);
 
   // fullscreen
-  fullscreenBtn.addEventListener('click', ()=>{ if(!document.fullscreenElement) document.documentElement.requestFullscreen(); else document.exitFullscreen(); resetUIHideTimer(); });
+  fullscreenBtn.addEventListener('click', ()=> { if(!document.fullscreenElement) document.documentElement.requestFullscreen(); else document.exitFullscreen(); resetUIHideTimer(); });
 
   // FOV slider
-  fovSlider.addEventListener('input', ()=>{ eyeScalePct = parseFloat(fovSlider.value); fovVal.textContent = Math.round(eyeScalePct) + '%'; computeViewports(); resetUIHideTimer(); });
+  fovSlider.addEventListener('input', ()=> { eyeScalePct = parseFloat(fovSlider.value); fovVal.textContent = Math.round(eyeScalePct) + '%'; computeViewports(); resetUIHideTimer(); });
 
-  // use requestVideoFrameCallback where available
+  // update video frame callback if available (keeps texture fresh)
   if(typeof videoEl.requestVideoFrameCallback === 'function'){
     try{
       const cb = ()=>{ if(videoTexture) videoTexture.needsUpdate = true; videoEl.requestVideoFrameCallback(cb); };
@@ -322,10 +298,10 @@ function initRendererAndScenes(mirrored=false){
     }catch(e){}
   }
 
-  requestAnimationFrame(loop);
+  requestAnimationFrame(renderLoop);
 }
 
-/* viewports centered vertically */
+/* compute viewports (centered vertically, 1.5:1 ratio) */
 function computeViewports(){
   const scale = Math.max(0.3, Math.min(1.0, eyeScalePct/100));
   let eyeH = Math.round(window.innerHeight * scale);
@@ -357,7 +333,7 @@ function computeViewports(){
   rightOutline.style.display = 'block';
   rightOutline.style.borderRadius = Math.max(8, Math.round(cachedView.rightH*0.06)) + 'px';
 
-  // update shader target aspect
+  // send target aspect to shader
   if(sceneVideo && sceneVideo.userData && sceneVideo.userData.mat){
     const ta = cachedView.leftW / cachedView.leftH;
     sceneVideo.userData.mat.uniforms.targetAspect.value = ta;
@@ -372,9 +348,9 @@ function onWindowResize(){
   computeViewports();
 }
 
-/* main loop */
-function loop(){
-  requestAnimationFrame(loop);
+/* render loop */
+function renderLoop(){
+  requestAnimationFrame(renderLoop);
   if(!renderer) return;
 
   if(deviceOrientationEnabled) perspectiveBase.quaternion.copy(deviceQuat);
@@ -389,7 +365,7 @@ function loop(){
 
   renderer.setScissorTest(true);
 
-  // LEFT eye: render video then 3D
+  // LEFT eye
   plane.position.set(v.leftX + v.leftW/2, v.leftY + v.leftH/2, 0);
   plane.scale.set(v.leftW, v.leftH, 1);
   renderer.setViewport(v.leftX, leftViewportY, v.leftW, v.leftH);
@@ -418,10 +394,10 @@ function loop(){
   renderer.setScissorTest(false);
 }
 
-/* reveal UI by tapping top region */
+/* reveal UI by tapping top area */
 window.addEventListener('pointerdown', (ev)=>{ if(ev.clientY <= 140) showUI(); });
 
-/* initial compute */
+/* initial */
 computeViewports();
 window.addEventListener('resize', onWindowResize);
 
