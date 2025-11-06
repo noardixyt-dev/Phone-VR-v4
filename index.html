@@ -1,83 +1,159 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Dual Eye Passthrough</title>
-  <style>
-    html, body {
-      margin: 0; padding: 0;
-      overflow: hidden;
-      background: black;
-      width: 100vw; height: 100vh;
-      display: flex; justify-content: center; align-items: center;
-    }
-    #container {
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      gap: 10px; /* gap between eyes */
-      height: 100%;
-    }
-    video.eye {
-      object-fit: cover;
-      aspect-ratio: 1.5 / 1;
-      border-radius: 15px;
-      height: 95%;
-      background: black;
-      transform: translateY(0);
-    }
-  </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover" />
+<title>Stereo VR Camera Passthrough</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden; background: #000;
+    font-family: system-ui, Roboto, Arial, sans-serif; color: #fff;
+  }
+  #startBtn {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    padding: 16px 24px; font-size: 18px; border-radius: 10px;
+    background: #111; color: #fff; z-index: 10; border: 1px solid rgba(255,255,255,0.1);
+  }
+  canvas { display: block; width: 100%; height: 100%; }
+</style>
 </head>
 <body>
-  <div id="container">
-    <video id="leftEye" class="eye" autoplay playsinline muted></video>
-    <video id="rightEye" class="eye" autoplay playsinline muted></video>
-  </div>
+<button id="startBtn">Tap to Start VR</button>
+<script src="https://cdn.jsdelivr.net/npm/three@0.153.0/build/three.min.js"></script>
+<script>
+let videoEl, videoTexture;
+let renderer, scene, orthoCam;
+let rtLeft, rtRight;
+const FIXED_IPD = 0.064;
 
-  <script>
-    async function getRearCameraStream() {
-      const constraintsList = [
-        { video: { facingMode: { exact: "environment" }, width: { ideal: 3840 }, height: { ideal: 2160 } } },
-        { video: { facingMode: "environment", width: { ideal: 3840 }, height: { ideal: 2160 } } },
-        { video: { facingMode: { exact: "rear" }, width: { ideal: 3840 }, height: { ideal: 2160 } } },
-        { video: { facingMode: { exact: "back" }, width: { ideal: 3840 }, height: { ideal: 2160 } } },
-        { video: { facingMode: { exact: "main" }, width: { ideal: 3840 }, height: { ideal: 2160 } } },
-        { video: { facingMode: "environment" } },
-        { video: true }
-      ];
+const startBtn = document.getElementById('startBtn');
 
-      for (const constraints of constraintsList) {
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia(constraints);
-          return stream;
-        } catch (err) {
-          console.warn("Camera attempt failed:", constraints, err.message);
+async function getRearCameraStream() {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    let camId = null;
+    for (const d of devices) {
+        if (d.kind === 'videoinput') {
+            const label = (d.label || '').toLowerCase();
+            if (label.includes('back') || label.includes('rear') || label.includes('environment') || label.includes('main')) {
+                camId = d.deviceId;
+                break;
+            }
         }
-      }
-
-      throw new Error("No usable rear camera found.");
     }
+    const resolutions = [
+        { width: 3840, height: 2160 },
+        { width: 1920, height: 1080 },
+        { width: 1280, height: 720 }
+    ];
+    for (const r of resolutions) {
+        try {
+            const constraints = camId ? 
+            { video: { deviceId: { exact: camId }, width: { ideal: r.width }, height: { ideal: r.height } }, audio: false } :
+            { video: { facingMode: { exact: "environment" }, width: { ideal: r.width }, height: { ideal: r.height } }, audio: false };
+            return await navigator.mediaDevices.getUserMedia(constraints);
+        } catch (err) {
+            console.warn('Resolution attempt failed', r, err);
+            continue;
+        }
+    }
+    return navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+}
 
-    async function startCamera() {
-      try {
+function initThree(videoEl) {
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(window.devicePixelRatio || 1);
+    renderer.autoClear = false;
+    document.body.appendChild(renderer.domElement);
+
+    scene = new THREE.Scene();
+    orthoCam = new THREE.OrthographicCamera(0, window.innerWidth, 0, window.innerHeight, -10, 10);
+
+    videoTexture = new THREE.VideoTexture(videoEl);
+    videoTexture.minFilter = THREE.LinearFilter;
+    videoTexture.magFilter = THREE.LinearFilter;
+    videoTexture.format = THREE.RGBAFormat;
+
+    const planeMat = new THREE.MeshBasicMaterial({ map: videoTexture });
+    const planeGeom = new THREE.PlaneGeometry(1,1);
+    const videoPlane = new THREE.Mesh(planeGeom, planeMat);
+    scene.add(videoPlane);
+    scene.userData.plane = videoPlane;
+
+    // render targets for left/right eyes
+    const rtParams = { minFilter:THREE.LinearFilter, magFilter:THREE.LinearFilter, format:THREE.RGBAFormat };
+    rtLeft = new THREE.WebGLRenderTarget(1024,1024, rtParams);
+    rtRight = new THREE.WebGLRenderTarget(1024,1024, rtParams);
+
+    window.addEventListener('resize', onResize);
+    onResize();
+
+    animate();
+}
+
+function onResize() {
+    if (!renderer) return;
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    orthoCam.left = 0;
+    orthoCam.right = window.innerWidth;
+    orthoCam.top = 0;
+    orthoCam.bottom = window.innerHeight;
+    orthoCam.updateProjectionMatrix();
+}
+
+function animate() {
+    requestAnimationFrame(animate);
+
+    if(videoEl.readyState >= videoEl.HAVE_ENOUGH_DATA) videoTexture.needsUpdate = true;
+
+    const plane = scene.userData.plane;
+
+    // Compute eye windows
+    const scale = 0.7; // 70% of height
+    let eyeH = window.innerHeight * scale;
+    let eyeW = eyeH * 1.5; // 1.5:1
+    const gap = 10;
+    const totalW = eyeW*2 + gap;
+    const leftX = (window.innerWidth - totalW)/2;
+    const rightX = leftX + eyeW + gap;
+    const topY = (window.innerHeight - eyeH)/2;
+
+    // Render left eye
+    plane.position.set(leftX + eyeW/2, topY + eyeH/2, 0);
+    plane.scale.set(eyeW, eyeH, 1);
+    renderer.setViewport(leftX, topY, eyeW, eyeH);
+    renderer.setScissor(leftX, topY, eyeW, eyeH);
+    renderer.setScissorTest(true);
+    renderer.clear();
+    renderer.render(scene, orthoCam);
+
+    // Render right eye
+    plane.position.set(rightX + eyeW/2, topY + eyeH/2, 0);
+    plane.scale.set(eyeW, eyeH, 1);
+    renderer.setViewport(rightX, topY, eyeW, eyeH);
+    renderer.setScissor(rightX, topY, eyeW, eyeH);
+    renderer.clear();
+    renderer.render(scene, orthoCam);
+
+    renderer.setScissorTest(false);
+}
+
+startBtn.addEventListener('click', async () => {
+    startBtn.style.display = 'none';
+    try {
         const stream = await getRearCameraStream();
-        const leftEye = document.getElementById("leftEye");
-        const rightEye = document.getElementById("rightEye");
-
-        // Clone stream for both eyes
-        const videoTracks = stream.getVideoTracks();
-        const clonedStream = new MediaStream(videoTracks.map(track => track.clone()));
-
-        leftEye.srcObject = stream;
-        rightEye.srcObject = clonedStream;
-      } catch (err) {
-        console.error("Camera start failed:", err);
-        alert("Unable to access rear camera. Please allow camera permissions and retry.");
-      }
+        videoEl = document.createElement('video');
+        videoEl.setAttribute('playsinline','');
+        videoEl.autoplay = true;
+        videoEl.muted = true;
+        videoEl.srcObject = stream;
+        await videoEl.play();
+        initThree(videoEl);
+    } catch(e) {
+        alert("Camera start failed: " + (e.message||e));
+        startBtn.style.display = 'block';
     }
-
-    startCamera();
-  </script>
+});
+</script>
 </body>
 </html>
