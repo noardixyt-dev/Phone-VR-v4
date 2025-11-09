@@ -1,142 +1,101 @@
-// hands.js
-// Minimal MediaPipe Hands wrapper. Non-blocking: if MediaPipe not available it silently does nothing.
-// Exports HandModule to global window so tracking.js can import/start it easily.
+// hands.js (module)
+// Exports: initHands(stream, onPalmCallback), stopHands()
 
-export const HandModule = (function(){
-  let hands = null;
-  let video = null;
-  let running = false;
-  const pinchThreshold = 0.05; // normalized distance
-  let lastPinch = false;
-  let overlayCanvas = null, overlayCtx = null;
+let handsInstance = null;
+let cameraUtils = null;
+let mediaStreamCamera = null;
+let running = false;
 
-  async function start({ videoElement, onPalm = ()=>{}, onPinch = ()=>{} } = {}){
-    video = videoElement;
-    if(!window.Hands){
-      console.warn('MediaPipe Hands not loaded; hand features disabled.');
+/**
+ * initHands(stream, onPalm)
+ *  - stream: MediaStream (camera stream)
+ *  - onPalm: function({x,y}, confidence) called where x,y are normalized [0..1] top-left
+ */
+export async function initHands(stream, onPalm){
+  if (!stream) throw new Error('No stream passed to initHands');
+
+  // Ensure MediaPipe Hands is available (loaded via CDN script in index.html)
+  if (typeof Hands === 'undefined') throw new Error('MediaPipe Hands not loaded (check CDN script)');
+
+  // lazy import camera_utils if available
+  if (typeof Camera === 'undefined' && typeof window.cameraUtils !== 'undefined') {
+    cameraUtils = window.cameraUtils;
+  } else {
+    // Camera util comes from CDN as well; MediaPipe exposes Camera global in many builds
+    cameraUtils = (typeof Camera !== 'undefined') ? Camera : null;
+  }
+
+  // Create an offscreen hidden video element to feed into Hands (we use the same stream)
+  const video = document.createElement('video');
+  video.autoplay = true;
+  video.playsInline = true;
+  video.muted = true;
+  video.srcObject = stream;
+  video.style.position = 'fixed';
+  video.style.width = '2px';
+  video.style.height = '2px';
+  video.style.opacity = '0';
+  document.body.appendChild(video);
+
+  // Wait a bit for the video to start
+  try { await video.play(); } catch(e){ /* ignore */ }
+
+  handsInstance = new Hands({locateFile: (file) => {
+    // rely on CDN path used in index.html
+    return `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/${file}`;
+  }});
+
+  handsInstance.setOptions({
+    maxNumHands: 2,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.55,
+    minTrackingConfidence: 0.5
+  });
+
+  handsInstance.onResults((results) => {
+    // results.multiHandLandmarks array
+    // we'll compute palm center as average of wrist + middle finger base
+    if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0){
+      onPalm && onPalm({x:0.5, y:0.5}, 0); // signal no palm
       return;
     }
-    // overlay canvas (draw tiny palm dot)
-    overlayCanvas = document.getElementById('overlay');
-    if(overlayCanvas){
-      overlayCtx = overlayCanvas.getContext('2d');
-      overlayCanvas.style.pointerEvents = 'none';
-    }
+    // pick first hand
+    const lm = results.multiHandLandmarks[0];
+    // landmarks indices: 0 = wrist, 9 = middle_finger_mcp
+    const wrist = lm[0], mid = lm[9];
+    const palmX = (wrist.x + mid.x) / 2;
+    const palmY = (wrist.y + mid.y) / 2;
+    // confidence approximate from presence of landmarks
+    const conf = results.multiHandedness && results.multiHandedness[0] && results.multiHandedness[0].score ? results.multiHandedness[0].score : 0.9;
+    // MediaPipe reports normalized coords relative to the video; convert to top-left origin
+    onPalm && onPalm({ x: palmX, y: palmY }, conf);
+  });
 
-    hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
-    hands.setOptions({
-      maxNumHands: 2,
-      modelComplexity: 1,
-      minDetectionConfidence: 0.6,
-      minTrackingConfidence: 0.5
+  // camera wrapper
+  if (cameraUtils && typeof cameraUtils.Camera === 'function'){
+    // Use camera utils to feed frames to hands (preferred)
+    mediaStreamCamera = new cameraUtils.Camera(video, {
+      onFrame: async () => { await handsInstance.send({image: video}); },
+      width: 1280,
+      height: 720
     });
-
-    hands.onResults((results) => {
-      // clear overlay drawing (2D)
-      if(overlayCtx){
-        overlayCtx.clearRect(0,0,overlayCanvas.width, overlayCanvas.height);
-      }
-      if(!results || !results.multiHandLandmarks || results.multiHandLandmarks.length === 0){
-        if(lastPinch){
-          lastPinch = false;
-          onPinch({ pinch:false, worldPoint:null });
-        }
-        return;
-      }
-      // choose first hand
-      const lm = results.multiHandLandmarks[0];
-      // compute palm center approximate
-      const p0 = lm[0], p5 = lm[5], p9 = lm[9], p17 = lm[17];
-      const palmX = (p0.x + p5.x + p9.x + p17.x) / 4.0;
-      const palmY = (p0.y + p5.y + p9.y + p17.y) / 4.0;
-      const sx = palmX * window.innerWidth;
-      const sy = palmY * window.innerHeight;
-
-      // try to compute a worldPoint by raycast using TrackingBridge camera
-      let worldPoint = null;
-      try{
-        const tb = window.TrackingBridge;
-        const cam = tb.getPerspectiveCamera();
-        const ndc = new THREE.Vector2((sx/window.innerWidth)*2 - 1, - (sy/window.innerHeight)*2 + 1);
-        const ray = new THREE.Raycaster();
-        ray.setFromCamera(ndc, cam);
-        worldPoint = ray.ray.at(1.4, new THREE.Vector3()); // menu distance
-      }catch(e){ worldPoint = null; }
-
-      // draw tiny palm dot on overlay (2D)
-      if(overlayCtx){
-        // scale canvas to device pixels
-        const dpr = window.devicePixelRatio || 1;
-        if(overlayCanvas.width !== Math.floor(window.innerWidth * dpr) || overlayCanvas.height !== Math.floor(window.innerHeight * dpr)){
-          overlayCanvas.width = Math.floor(window.innerWidth * dpr);
-          overlayCanvas.height = Math.floor(window.innerHeight * dpr);
-          overlayCanvas.style.width = window.innerWidth + 'px';
-          overlayCanvas.style.height = window.innerHeight + 'px';
-          overlayCtx.scale(dpr, dpr);
-        }
-        overlayCtx.beginPath();
-        overlayCtx.fillStyle = 'rgba(255,255,255,0.95)';
-        overlayCtx.arc(sx, sy, 6, 0, Math.PI*2);
-        overlayCtx.fill();
-      }
-
-      // pinch detection between index tip (8) and thumb tip (4)
-      const it = lm[8], tt = lm[4];
-      const dx = it.x - tt.x, dy = it.y - tt.y;
-      const dist = Math.sqrt(dx*dx + dy*dy);
-      const pinch = dist < pinchThreshold;
-
-      // callbacks
-      onPalm({ x: sx, y: sy, worldPoint });
-      onPinch({ pinch, worldPoint });
-
-      // call drag functions on TrackingBridge
-      try{
-        const tb = window.TrackingBridge;
-        if(pinch && worldPoint){
-          if(!lastPinch){
-            // pinch started
-            lastPinch = true;
-            tb.startDrag(worldPoint);
-          } else {
-            // continuing pinch
-            tb.updateDrag(worldPoint);
-          }
-        } else {
-          if(lastPinch){
-            lastPinch = false;
-            tb.endDrag();
-          }
-        }
-      }catch(e){}
-    });
-
+    mediaStreamCamera.start();
     running = true;
-    // dispatch frames to MediaPipe via requestVideoFrameCallback if available
-    function tick(){
-      if(!running) return;
-      if(video && video.readyState >= 2){
-        hands.send({ image: video }).catch(()=>{});
-      }
-      if(video && typeof video.requestVideoFrameCallback === 'function'){
-        video.requestVideoFrameCallback(()=> tick());
-      } else {
-        setTimeout(()=> tick(), 1000/30);
-      }
-    }
-    tick();
+  } else {
+    // fallback: poll frames via interval
+    const iv = setInterval(async () => {
+      if (!handsInstance) { clearInterval(iv); return; }
+      await handsInstance.send({ image: video });
+    }, 1000/30);
+    running = true;
   }
+}
 
-  function stop(){
-    running = false;
-    // clear overlay
-    if(overlayCtx) overlayCtx.clearRect(0,0,overlayCanvas.width, overlayCanvas.height);
-    if(hands){ hands.close(); hands = null; }
-  }
-
-  return { start, stop };
-})();
-
-// expose on window (so tracking.js can import via dynamic import if needed)
-window.HandModule = HandModule;
-export { HandModule };
+/* stopHands() */
+export function stopHands(){
+  try {
+    if (mediaStreamCamera && typeof mediaStreamCamera.stop === 'function') mediaStreamCamera.stop();
+  } catch(e){}
+  try { if (handsInstance) handsInstance.close(); } catch(e){}
+  handsInstance = null; mediaStreamCamera = null; running = false;
+}
