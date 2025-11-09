@@ -3,258 +3,50 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover" />
-<title>Stereo XR Viewer — Rear camera passthrough + 3DOF menu</title>
+<title>Stereo Viewer — 6DoF + Hand Tracking</title>
+<link rel="stylesheet" href="style.css">
 <style>
-  :root{--ui-bg:rgba(0,0,0,0.45);--outline:rgba(255,255,255,0.06)}
-  html,body{margin:0;padding:0;height:100%;width:100%;background:#000;color:#fff;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial;overflow:hidden}
-  /* stereo container: bottom-anchored, windows grow upwards */
-  #stereoWrap{position:fixed;inset:0;display:flex;justify-content:center;align-items:flex-end;gap:var(--gap,12px);padding-bottom:12px;pointer-events:none;z-index:10}
-  .eyeWin{width:var(--eye-w,360px);height:var(--eye-h,240px);border-radius:14px;overflow:hidden;border:2px solid var(--outline);box-shadow:0 6px 22px rgba(0,0,0,0.6);background:#000;position:relative}
-  .eyeVideo{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform-origin:center center;pointer-events:none}
-  /* overlay canvas for 3D menu and hand dot */
-  canvas#overlay{position:fixed;left:0;top:0;width:100%;height:100%;z-index:40;pointer-events:none;display:block}
-  /* UI */
-  #controls{position:fixed;left:12px;top:10px;z-index:60;display:flex;gap:10px;align-items:center;pointer-events:auto;transition:opacity .32s,transform .32s}
-  #controls.hidden{opacity:0;pointer-events:none;transform:translateY(-8px)}
-  .control{background:var(--ui-bg);backdrop-filter:blur(6px);padding:8px;border-radius:8px;font-size:13px;color:#fff}
-  #fovSlider{width:220px}
-  #fullscreenBtn{position:fixed;top:10px;right:10px;z-index:60;padding:8px 12px;border-radius:8px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.06);color:#fff;font-size:14px;pointer-events:auto;display:none}
-  #startBtn{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:80;padding:14px 18px;border-radius:10px;background:#111;color:#fff;border:1px solid rgba(255,255,255,0.06);cursor:pointer}
-  #hint{position:fixed;left:50%;bottom:10px;transform:translateX(-50%);font-size:12px;background:rgba(0,0,0,0.35);padding:6px 10px;border-radius:8px;z-index:60}
-  #portraitOverlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.92);z-index:9999;color:#fff;font-size:20px;padding:20px;text-align:center;pointer-events:auto}
-  /* accessibility/debug (hidden by default) */
-  #debugLog{position:fixed;left:10px;bottom:10px;color:#0f0;background:rgba(0,0,0,0.6);padding:6px;border-radius:6px;font-size:11px;z-index:9998;display:none}
-  /* small helpful hints for pointer events */
-  .hidden{display:none!important}
+html,body{margin:0;padding:0;height:100%;width:100%;background:#000;color:#fff;overflow:hidden;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial}
+canvas#overlay{position:fixed;left:0;top:0;width:100%;height:100%;z-index:40;pointer-events:none;display:block}
+#stereoWrap{position:fixed;inset:0;display:flex;justify-content:center;align-items:center;gap:12px;pointer-events:none;z-index:10}
+.eyeWin{width:360px;height:240px;border-radius:14px;overflow:hidden;border:2px solid rgba(255,255,255,0.06);box-shadow:0 6px 22px rgba(0,0,0,0.6);background:#000;position:relative}
+.eyeVideo{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform-origin:center center}
+#controls{position:fixed;left:12px;top:10px;z-index:60;display:flex;gap:10px;align-items:center;pointer-events:auto;transition:opacity .32s,transform .32s}
+#controls.hidden{opacity:0;pointer-events:none;transform:translateY(-8px)}
+.control{background:rgba(0,0,0,0.45);backdrop-filter:blur(6px);padding:8px;border-radius:8px;font-size:13px;color:#fff}
+#fullscreenBtn{position:fixed;top:10px;right:10px;z-index:60;padding:8px 12px;border-radius:8px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.06);color:#fff;font-size:14px;pointer-events:auto;display:none}
+#startBtn{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:80;padding:14px 18px;border-radius:10px;background:#111;color:#fff;border:1px solid rgba(255,255,255,0.06);cursor:pointer}
+#hint{position:fixed;left:50%;bottom:10px;transform:translateX(-50%);font-size:12px;background:rgba(0,0,0,0.35);padding:6px 10px;border-radius:8px;z-index:60}
+#portraitOverlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.9);z-index:120;color:#fff;font-size:20px;padding:20px;text-align:center;pointer-events:auto}
+#error6dof{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.8);color:#ff8888;font-size:18px;z-index:130;text-align:center;padding:20px;border-radius:12px}
 </style>
 </head>
 <body>
-  <button id="startBtn">Start VR (camera & motion)</button>
 
-  <div id="controls" class="hidden" style="display:none">
-    <div class="control">
-      <div style="font-size:12px;margin-bottom:6px">FOV <span id="fovVal">70%</span></div>
-      <input id="fovSlider" type="range" min="40" max="100" value="70" />
-    </div>
+<button id="startBtn">Start VR (camera & motion)</button>
+
+<div id="controls" class="hidden" style="display:none">
+  <div class="control">
+    <div style="font-size:12px;margin-bottom:6px">FOV (eye window) <span id="fovVal">70%</span></div>
+    <input id="fovSlider" type="range" min="40" max="100" value="70" />
   </div>
+</div>
 
-  <button id="fullscreenBtn">Fullscreen</button>
-  <div id="hint">Double-tap to toggle anchored menu • Tap top to show UI</div>
+<button id="fullscreenBtn">Fullscreen</button>
+<div id="hint">Double-tap to toggle anchored menu • Tap top to show UI</div>
+<div id="portraitOverlay">Please rotate your device to landscape</div>
+<div id="error6dof">Full 6DoF tracking not compatible</div>
 
-  <div id="portraitOverlay">Please rotate your device to landscape</div>
+<div id="stereoWrap" aria-hidden="true">
+  <div id="leftWin" class="eyeWin"><video id="videoLeft" class="eyeVideo" playsinline autoplay muted></video></div>
+  <div id="rightWin" class="eyeWin"><video id="videoRight" class="eyeVideo" playsinline autoplay muted></video></div>
+</div>
 
-  <!-- Two separate video elements that both receive the same rear-camera stream -->
-  <div id="stereoWrap" aria-hidden="true">
-    <div id="leftWin" class="eyeWin"><video id="videoLeft" class="eyeVideo" playsinline autoplay muted></video></div>
-    <div id="rightWin" class="eyeWin"><video id="videoRight" class="eyeVideo" playsinline autoplay muted></video></div>
-  </div>
+<canvas id="overlay"></canvas>
 
-  <!-- canvas overlay used for 3D menu rendering and hand-dot rendering -->
-  <canvas id="overlay"></canvas>
+<script src="https://cdn.jsdelivr.net/npm/three@0.153.0/build/three.min.js"></script>
+<script src="hand-tracking.js"></script>
+<script src="menu-tracking.js"></script>
 
-  <div id="debugLog" class="hidden"></div>
-
-  <!-- Three.js (for overlay menu rendering) -->
-  <script src="https://cdn.jsdelivr.net/npm/three@0.153.0/build/three.min.js"></script>
-
-  <!-- MediaPipe Hands - will be used inside handTracking.js -->
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
-
-  <!-- Menu tracking and hand tracking modules -->
-  <script type="module" src="./menuTracking.js"></script>
-  <script type="module" src="./handTracking.js"></script>
-
-  <!-- main app script (wires camera + UI + overlay into modules) -->
-  <script type="module">
-  import { initMenuRendering, onWindowResize as menuOnWindowResize, toggleMenuFromInput, setMenuScale } from './menuTracking.js';
-  import { initHandTracking, attachHandStream, getPalmIntersection } from './handTracking.js';
-
-  const startBtn = document.getElementById('startBtn');
-  const controls = document.getElementById('controls');
-  const fullscreenBtn = document.getElementById('fullscreenBtn');
-  const fovSlider = document.getElementById('fovSlider');
-  const fovVal = document.getElementById('fovVal');
-  const hint = document.getElementById('hint');
-  const portraitOverlay = document.getElementById('portraitOverlay');
-  const leftWin = document.getElementById('leftWin');
-  const rightWin = document.getElementById('rightWin');
-  const videoLeft = document.getElementById('videoLeft');
-  const videoRight = document.getElementById('videoRight');
-  const overlay = document.getElementById('overlay');
-  const debugLog = document.getElementById('debugLog');
-
-  let stream = null;
-  let eyeScalePct = parseFloat(fovSlider.value);
-  fovVal.textContent = Math.round(eyeScalePct) + '%';
-
-  let uiHideTimer = null;
-  const UI_HIDE_MS = 10000;
-  function showUI(){ controls.style.display='flex'; controls.classList.remove('hidden'); fullscreenBtn.style.display='block'; resetUIHideTimer(); }
-  function hideUI(){ controls.classList.add('hidden'); fullscreenBtn.style.display='none'; }
-  function resetUIHideTimer(){ if(uiHideTimer) clearTimeout(uiHideTimer); uiHideTimer = setTimeout(()=>{ hideUI(); }, UI_HIDE_MS); }
-
-  window.addEventListener('pointermove', ()=> resetUIHideTimer(), { passive:true });
-  controls.addEventListener('pointerdown', ()=> showUI());
-
-  // --- device orientation helpers (landscape-calibrated + remove roll) ---
-  const zee = new THREE.Vector3(0,0,1);
-  const qPortraitToThree = new THREE.Quaternion(-Math.sqrt(0.5),0,0,Math.sqrt(0.5));
-  let deviceQuat = new THREE.Quaternion();
-  let deviceOrientationEnabled = false;
-  function getScreenOrientationDeg(){ if (screen && screen.orientation && typeof screen.orientation.angle === 'number') return screen.orientation.angle; return window.orientation || 0; }
-  function setObjectQuaternionFromSensor(quatOut, alpha, beta, gamma){
-    const orient = getScreenOrientationDeg(); const deg = Math.PI/180;
-    const e = new THREE.Euler((beta||0)*deg, (alpha||0)*deg, -(gamma||0)*deg, 'YXZ'); quatOut.setFromEuler(e);
-    let baseRot = new THREE.Quaternion();
-    if (orient === 90) baseRot.setFromAxisAngle(zee, -Math.PI/2);
-    else if (orient === -90 || orient === 270) baseRot.setFromAxisAngle(zee, Math.PI/2);
-    else if (orient === 180) baseRot.setFromAxisAngle(zee, Math.PI);
-    quatOut.multiply(qPortraitToThree);
-    quatOut.multiply(baseRot);
-    const ex = new THREE.Euler().setFromQuaternion(quatOut,'YXZ'); ex.z = 0; quatOut.setFromEuler(ex);
-  }
-  async function enableDeviceOrientation(){
-    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function'){
-      try{
-        const perm = await DeviceOrientationEvent.requestPermission();
-        if (perm === 'granted') window.addEventListener('deviceorientation', ev=>{ deviceOrientationEnabled=true; setObjectQuaternionFromSensor(deviceQuat, ev.alpha, ev.beta, ev.gamma); }, true);
-        else window.addEventListener('deviceorientation', ev=>{ deviceOrientationEnabled=true; setObjectQuaternionFromSensor(deviceQuat, ev.alpha, ev.beta, ev.gamma); }, true);
-      }catch(e){ window.addEventListener('deviceorientation', ev=>{ deviceOrientationEnabled=true; setObjectQuaternionFromSensor(deviceQuat, ev.alpha, ev.beta, ev.gamma); }, true); }
-    } else {
-      window.addEventListener('deviceorientation', ev=>{ deviceOrientationEnabled=true; setObjectQuaternionFromSensor(deviceQuat, ev.alpha, ev.beta, ev.gamma); }, true);
-    }
-  }
-
-  // --- choose rear camera ---
-  async function enumerateVideoInputs(){ try{ const devs = await navigator.mediaDevices.enumerateDevices(); return devs.filter(d=>d.kind==='videoinput'); }catch(e){ return []; } }
-  async function chooseRearDeviceId(){
-    const cams = await enumerateVideoInputs();
-    for (const c of cams){
-      const L = (c.label||'').toLowerCase();
-      if (L.includes('back')||L.includes('rear')||L.includes('environment')||L.includes('main')||L.includes('wide')) return c.deviceId;
-    }
-    for (const c of cams){
-      const L = (c.label||'').toLowerCase();
-      if (!L.includes('front') && !L.includes('selfie')) return c.deviceId;
-    }
-    return cams.length ? cams[0].deviceId : null;
-  }
-
-  async function startCameraStream(){
-    const deviceId = await chooseRearDeviceId();
-    const tryRes = [{w:3840,h:2160},{w:1920,h:1080},{w:1280,h:720}];
-    const fps = [60,30];
-    for (const r of tryRes){
-      for (const f of fps){
-        try {
-          const constraints = deviceId
-            ? { video:{ deviceId:{ exact: deviceId }, width:{ ideal: r.w }, height:{ ideal: r.h }, frameRate:{ ideal: f } }, audio:false }
-            : { video:{ facingMode:{ ideal:'environment' }, width:{ ideal: r.w }, height:{ ideal: r.h }, frameRate:{ ideal: f } }, audio:false };
-          const s = await navigator.mediaDevices.getUserMedia(constraints);
-          return s;
-        } catch(e){ /* try next */ }
-      }
-    }
-    return navigator.mediaDevices.getUserMedia({ video:true, audio:false });
-  }
-
-  // --- START flow ---
-  startBtn.addEventListener('click', async ()=>{
-    startBtn.style.display = 'none';
-    await enableDeviceOrientation();
-    showUI();
-    try {
-      stream = await startCameraStream();
-      // attach same stream to both videos
-      videoLeft.srcObject = stream;
-      videoRight.srcObject = stream;
-      try { await videoLeft.play(); } catch(e){ console.warn('left play blocked', e); }
-      try { await videoRight.play(); } catch(e){ console.warn('right play blocked', e); }
-      controls.style.display = 'flex';
-      fullscreenBtn.style.display = 'block';
-      // init overlay rendering & hand tracking
-      initMenuRendering({ overlayCanvas: overlay, deviceQuatProvider: ()=>deviceQuat });
-      attachHandStream(stream, { videoElLeft: videoLeft, videoElRight: videoRight }); // handTracking will create internal detection
-      initHandTracking(); // run
-    } catch(err) {
-      console.error('camera start failed', err);
-      alert('Camera access failed: ' + (err && err.message ? err.message : err));
-      startBtn.style.display = 'block';
-    }
-  });
-
-  // fullscreen button
-  fullscreenBtn.addEventListener('click', ()=>{
-    if (!document.fullscreenElement) document.documentElement.requestFullscreen();
-    else document.exitFullscreen();
-    resetUIHideTimer();
-  });
-
-  // FOV slider
-  fovSlider.addEventListener('input', ()=>{
-    eyeScalePct = parseFloat(fovSlider.value);
-    fovVal.textContent = Math.round(eyeScalePct) + '%';
-    // update CSS variables to layout eyes (bottom-anchored, grow upwards)
-    layoutEyes();
-    // tell menu system to scale menu accordingly
-    setMenuScale(eyeScalePct / 70);
-    resetUIHideTimer();
-  });
-
-  // layoutEyes: bottom-anchored windows grow upward; centered horizontally
-  function layoutEyes(){
-    const scale = Math.max(0.3, Math.min(1.0, eyeScalePct/100));
-    let eyeH = Math.round(window.innerHeight * scale);
-    let eyeW = Math.floor(eyeH * 1.5);
-    let gap = Math.max(8, Math.round(eyeW * 0.06));
-    if (eyeW * 2 + gap > window.innerWidth){
-      const avail = window.innerWidth - gap;
-      eyeW = Math.floor(avail / 2);
-      eyeH = Math.floor(eyeW * 2/3);
-    }
-    // Center vertically: compute a top so windows remain visually centered when smaller:
-    // We'll set CSS vars for size; stereoWrap is bottom-anchored (align-items:flex-end),
-    // but to keep them visually centered we update stereoWrap padding-bottom dynamically:
-    document.documentElement.style.setProperty('--eye-w', eyeW + 'px');
-    document.documentElement.style.setProperty('--eye-h', eyeH + 'px');
-    document.documentElement.style.setProperty('--gap', gap + 'px');
-
-    // Also nudge stereoWrap padding-bottom so scaled windows are more centered visually:
-    const stereoWrap = document.getElementById('stereoWrap');
-    const bottomPad = Math.max(8, Math.floor((window.innerHeight - eyeH) * 0.08));
-    stereoWrap.style.paddingBottom = bottomPad + 'px';
-  }
-
-  function updatePortrait(){
-    if (window.innerHeight > window.innerWidth){
-      portraitOverlay.style.display = 'flex';
-      controls.classList.add('hidden');
-      fullscreenBtn.style.display='none';
-    } else {
-      portraitOverlay.style.display = 'none';
-      if (!controls.classList.contains('hidden')) controls.style.display='flex';
-      if (controls.style.display !== 'none') fullscreenBtn.style.display='block';
-    }
-  }
-
-  // top tap reveals UI
-  window.addEventListener('pointerdown', (ev)=>{ if (ev.clientY <= 120) showUI(); });
-
-  // pass double-tap toggles to menuTracking (overlayPointerDown in menuTracking also listens)
-  window.addEventListener('dblclick', ()=> { toggleMenuFromInput(); });
-
-  // window resize
-  window.addEventListener('resize', ()=>{
-    layoutEyes();
-    updatePortrait();
-    menuOnWindowResize();
-  });
-
-  // initial layout
-  layoutEyes();
-  updatePortrait();
-
-  </script>
 </body>
 </html>
