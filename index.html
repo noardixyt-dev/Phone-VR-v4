@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover" />
-<title>Stereo Passthrough — 6DOF menu + single-pass</title>
+<title>Stereo VR — Rear camera passthrough + 3DOF Menu</title>
 <style>
   :root { --outline: rgba(255,255,255,0.06); }
   html,body{margin:0;padding:0;height:100%;width:100%;background:#000;color:#fff;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial;overflow:hidden}
-  /* stereo container: bottom-anchored, windows grow upward */
-  #stereoWrap{position:fixed;inset:0;display:flex;justify-content:center;align-items:flex-end;gap:var(--gap,12px);padding-bottom:12px;pointer-events:none;z-index:10}
+  /* stereo container: centered vertically so scaled windows remain visible */
+  #stereoWrap{position:fixed;inset:0;display:flex;justify-content:center;align-items:center;gap:var(--gap,12px);pointer-events:none;z-index:10}
   .eyeWin{width:var(--eye-w,360px);height:var(--eye-h,240px);border-radius:14px;overflow:hidden;border:2px solid var(--outline);box-shadow:0 6px 22px rgba(0,0,0,0.6);background:#000;position:relative}
-  .eyeVideo{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform-origin:center center;-webkit-transform-origin:center center}
+  .eyeVideo{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform-origin:center center}
   /* UI */
   #controls{position:fixed;left:12px;top:10px;z-index:60;display:flex;gap:10px;align-items:center;pointer-events:auto;transition:opacity .32s,transform .32s}
   #controls.hidden{opacity:0;pointer-events:none;transform:translateY(-8px)}
@@ -19,15 +19,13 @@
   #fullscreenBtn{position:fixed;top:10px;right:10px;z-index:60;padding:8px 12px;border-radius:8px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.06);color:#fff;font-size:14px;pointer-events:auto;display:none}
   #startBtn{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:80;padding:14px 18px;border-radius:10px;background:#111;color:#fff;border:1px solid rgba(255,255,255,0.06);cursor:pointer}
   #hint{position:fixed;left:50%;bottom:10px;transform:translateX(-50%);font-size:12px;background:rgba(0,0,0,0.35);padding:6px 10px;border-radius:8px;z-index:60}
-  #portraitOverlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.9);z-index:120;color:#fff;font-size:20px;padding:20px;text-align:center;pointer-events:auto}
-  /* overlay canvas for 3D menu */
+  #portraitOverlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.92);z-index:9999;color:#fff;font-size:20px;padding:20px;text-align:center;pointer-events:auto}
   canvas#overlay{position:fixed;left:0;top:0;width:100%;height:100%;z-index:40;pointer-events:none;display:block}
-  /* debug/log */
-  #debugLog{position:fixed;left:10px;bottom:10px;color:#0f0;background:rgba(0,0,0,0.6);padding:6px;border-radius:6px;font-size:11px;z-index:9998;display:none;pointer-events:none}
+  #debugLog{position:fixed;left:6px;bottom:6px;color:#0f0;background:rgba(0,0,0,0.6);padding:6px;border-radius:6px;font-size:11px;z-index:9998;display:none}
 </style>
 </head>
 <body>
-  <button id="startBtn">Start VR (camera & motion)</button>
+  <button id="startBtn">Start VR</button>
 
   <div id="controls" class="hidden" style="display:none">
     <div class="control">
@@ -37,6 +35,7 @@
   </div>
 
   <button id="fullscreenBtn">Fullscreen</button>
+  
   <div id="portraitOverlay">Please rotate your device to landscape</div>
 
   <div id="stereoWrap" aria-hidden="true">
@@ -47,14 +46,13 @@
   <canvas id="overlay"></canvas>
   <div id="debugLog"></div>
 
-  <!-- three -->
-  <script src="https://cdn.jsdelivr.net/npm/three@0.153.0/build/three.min.js"></script>
+  <!-- MediaPipe Hands (non-module global) - optional; if blocked your page still works -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.4/camera_utils.js"></script>
 
-  <!-- MediaPipe Hands (optional for hand-driven pinch) -->
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
-
-  <!-- application scripts -->
-  <script type="module" src="./tracking.js"></script>
-  <script type="module" src="./hands.js"></script>
+  <!-- main modules -->
+  <script type="module">
+    import './tracking.js';
+  </script>
 </body>
 </html>
