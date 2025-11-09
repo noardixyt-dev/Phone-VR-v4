@@ -172,7 +172,7 @@ async function chooseRearDeviceId(){
 async function startCameraStream(){
   const deviceId = await chooseRearDeviceId();
   const resolutions = [{w:3840,h:2160},{w:1920,h:1080},{w:1280,h:720}];
-  const fpsCandidates = [60,30];
+  const fpsCandidates = [120,60,30];
   for(const r of resolutions){
     for(const fps of fpsCandidates){
       try {
@@ -238,7 +238,7 @@ let renderer, scene3D, perspectiveBase, camLeft, camRight;
 let rtScene, postScene, postCamera, blitMesh, blitMaterial;
 let menuMesh = null, menuBar = null, palmSphere = null;
 let lastRenderTime = 0;
-const TARGET_FPS = 30;
+const TARGET_FPS = 60;
 const FIXED_IPD = 0.064;
 
 function onRendererResize(){
