@@ -3,46 +3,43 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover" />
-<title>Stereo VR Viewer — 6DOF & Hand Tracking</title>
+<title>Stereo VR Viewer</title>
+<link rel="stylesheet" href="style.css" />
 <style>
-:root{--outline:rgba(255,255,255,0.06);}
-html,body{margin:0;padding:0;width:100%;height:100%;background:#000;color:#fff;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial;overflow:hidden}
-canvas#overlay{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:40}
-#stereoWrap{position:fixed;inset:0;display:flex;justify-content:center;align-items:center;gap:var(--gap,12px);pointer-events:none;z-index:10}
-.eyeWin{border-radius:14px;overflow:hidden;border:2px solid var(--outline);box-shadow:0 6px 22px rgba(0,0,0,0.6);background:#000;position:relative;width:var(--eye-w,360px);height:var(--eye-h,240px)}
-.eyeVideo{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform-origin:center center}
-#controls{position:fixed;top:10px;left:12px;z-index:60;display:flex;gap:10px;align-items:center;pointer-events:auto;transition:opacity .32s,transform .32s}
-#controls.hidden{opacity:0;pointer-events:none;transform:translateY(-8px)}
-.control{background:rgba(0,0,0,0.45);backdrop-filter:blur(6px);padding:8px;border-radius:8px;font-size:13px;color:#fff}
-#fovSlider{width:220px}
-#fullscreenBtn{position:fixed;top:10px;right:10px;z-index:60;padding:8px 12px;border-radius:8px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.06);color:#fff;font-size:14px;pointer-events:auto;display:none}
-#startBtn{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:80;padding:14px 18px;border-radius:10px;background:#111;color:#fff;border:1px solid rgba(255,255,255,0.06);cursor:pointer}
-#hint{position:fixed;left:50%;bottom:10px;transform:translateX(-50%);font-size:12px;background:rgba(0,0,0,0.35);padding:6px 10px;border-radius:8px;z-index:60}
-#portraitOverlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.9);z-index:120;color:#fff;font-size:20px;padding:20px;text-align:center;pointer-events:auto}
+  html,body{margin:0;padding:0;height:100%;width:100%;background:#000;color:#fff;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial;overflow:hidden;}
+  #stereoWrap{position:fixed;inset:0;display:flex;justify-content:center;align-items:center;gap:12px;pointer-events:none;z-index:10;}
+  .eyeWin{width:360px;height:240px;border-radius:14px;overflow:hidden;border:2px solid rgba(255,255,255,0.06);box-shadow:0 6px 22px rgba(0,0,0,0.6);background:#000;position:relative;}
+  .eyeVideo{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform-origin:center center;}
+  #controls{position:fixed;left:12px;top:10px;z-index:60;display:flex;gap:10px;align-items:center;pointer-events:auto;transition:opacity .32s,transform .32s;}
+  .control{background:rgba(0,0,0,0.45);backdrop-filter:blur(6px);padding:8px;border-radius:8px;font-size:13px;color:#fff;}
+  #fovSlider{width:220px;}
+  #fullscreenBtn{position:fixed;top:10px;right:10px;z-index:60;padding:8px 12px;border-radius:8px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.06);color:#fff;font-size:14px;pointer-events:auto;}
+  #startBtn{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:80;padding:14px 18px;border-radius:10px;background:#111;color:#fff;border:1px solid rgba(255,255,255,0.06);cursor:pointer;}
+  #portraitOverlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.9);z-index:120;color:#fff;font-size:20px;padding:20px;text-align:center;pointer-events:auto;}
+  canvas#overlay{position:fixed;left:0;top:0;width:100%;height:100%;z-index:40;pointer-events:none;display:block;}
 </style>
 </head>
 <body>
-<button id="startBtn">Start VR (camera & motion)</button>
 
+<button id="startBtn">Start VR (camera & motion)</button>
 <div id="controls" class="hidden" style="display:none">
   <div class="control">
-    <div style="font-size:12px;margin-bottom:6px">FOV (eye window) <span id="fovVal">70%</span></div>
+    <div style="font-size:12px;margin-bottom:6px">FOV <span id="fovVal">70%</span></div>
     <input id="fovSlider" type="range" min="40" max="100" value="70" />
   </div>
 </div>
-
 <button id="fullscreenBtn">Fullscreen</button>
-<div id="hint">Double-tap to toggle menu • Tap top to show UI</div>
+<div id="stereoWrap">
+  <div class="eyeWin" id="leftWin"><video id="videoLeft" class="eyeVideo" playsinline autoplay muted></video></div>
+  <div class="eyeWin" id="rightWin"><video id="videoRight" class="eyeVideo" playsinline autoplay muted></video></div>
+</div>
+<canvas id="overlay"></canvas>
 <div id="portraitOverlay">Please rotate your device to landscape</div>
 
-<div id="stereoWrap" aria-hidden="true">
-  <div id="leftWin" class="eyeWin"><video id="videoLeft" class="eyeVideo" playsinline autoplay muted></video></div>
-  <div id="rightWin" class="eyeWin"><video id="videoRight" class="eyeVideo" playsinline autoplay muted></video></div>
-</div>
+<script type="module">
+import './menu-tracking.js';
+import './hand-tracking.js';
+</script>
 
-<canvas id="overlay"></canvas>
-
-<script type="module" src="hand-tracking.js"></script>
-<script type="module" src="menu-tracking.js"></script>
 </body>
 </html>
