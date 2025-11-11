@@ -3,73 +3,60 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover" />
-<title>Stereo MR — rear passthrough + world-locked menu + hand pointer</title>
+<title>Stereo VR — 6DOF Menu + Hand Pointer</title>
 <style>
-  :root{--ui-bg:rgba(0,0,0,0.45);--outline:rgba(255,255,255,0.06)}
-  html,body{margin:0;padding:0;height:100%;width:100%;background:#000;color:#fff;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial;overflow:hidden}
-  /* UI top */
-  #controls{position:fixed;z-index:220;top:10px;left:12px;display:flex;gap:10px;align-items:center;transition:opacity .32s ease,transform .32s ease;pointer-events:auto}
-  #controls.hidden{opacity:0;pointer-events:none;transform:translateY(-8px)}
-  .control{background:var(--ui-bg);backdrop-filter:blur(6px);padding:8px;border-radius:8px;font-size:13px;color:#fff}
-  #fovSlider{width:220px}
-  #fullscreenBtn{position:fixed;top:10px;right:10px;z-index:220;padding:8px 12px;border-radius:8px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.06);color:#fff;font-size:14px;transition:opacity .32s}
-  #startBtn{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);padding:14px 20px;border-radius:10px;background:#111;color:#fff;z-index:320;border:1px solid rgba(255,255,255,0.06);font-size:16px;pointer-events:auto}
-  #hint{position:fixed;left:50%;bottom:10px;transform:translateX(-50%);font-size:12px;opacity:0.95;padding:6px 10px;border-radius:8px;background:rgba(0,0,0,0.35);z-index:210;pointer-events:none}
-  #portraitOverlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.92);z-index:9999;color:#fff;font-size:20px;padding:20px;text-align:center;pointer-events:auto}
-  /* outlines for eye windows */
-  .eye-outline{position:absolute;border-radius:14px;pointer-events:none;z-index:200;box-shadow:0 6px 22px rgba(0,0,0,0.5);border:2px solid var(--outline);transition:opacity .25s}
-  /* stereo windows container */
-  #stereoWrap{position:fixed;inset:0;display:flex;justify-content:center;align-items:flex-end;gap:var(--gap,12px);padding-bottom:12px;pointer-events:none;z-index:10}
-  .eyeWin{width:var(--eye-w,360px);height:var(--eye-h,240px);border-radius:14px;overflow:hidden;border:2px solid var(--outline);box-shadow:0 6px 22px rgba(0,0,0,0.6);background:#000;position:relative}
-  .eyeVideo{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform-origin:center center}
-  /* overlay canvas for 3D/hand dot */
-  canvas#overlay{position:fixed;left:0;top:0;width:100%;height:100%;z-index:40;pointer-events:none;display:block}
-  /* menu styling fallback (plain DOM fallback if WebGL disabled) */
-  #domMenuFallback{display:none;position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:500;background:rgba(255,255,255,0.06);backdrop-filter:blur(10px);border-radius:12px;padding:12px;color:#fff}
-  /* small debug log - optional */
-  #debugLog{position:fixed;left:8px;bottom:8px;color:#0f0;background:rgba(0,0,0,0.6);padding:6px;border-radius:6px;font-size:11px;z-index:9999;display:none}
+html,body{margin:0;padding:0;width:100%;height:100%;background:#000;color:#fff;overflow:hidden;font-family:system-ui,Segoe UI,Roboto,Arial;}
+#stereoWrap{position:fixed;inset:0;display:flex;justify-content:center;align-items:center;gap:12px;pointer-events:none;}
+.eyeWin{width:40vw;height:30vw;border-radius:12px;overflow:hidden;border:2px solid rgba(255,255,255,0.08);box-shadow:0 6px 18px rgba(0,0,0,0.6);position:relative;background:#000;}
+.eyeVideo{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;}
+#overlay{position:fixed;inset:0;z-index:50;pointer-events:none;}
+#startBtn{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);padding:14px 18px;border-radius:10px;background:#111;color:#fff;border:1px solid rgba(255,255,255,0.06);cursor:pointer;z-index:80;}
+#hint{position:fixed;left:50%;bottom:10px;transform:translateX(-50%);font-size:12px;background:rgba(0,0,0,0.35);padding:6px 10px;border-radius:8px;z-index:60}
 </style>
 </head>
 <body>
-  <button id="startBtn">Start VR (camera & motion)</button>
 
-  <div id="controls" class="hidden" style="display:none">
-    <div class="control">
-      <div style="font-size:12px;margin-bottom:6px">FOV (eye window) <span id="fovVal">70%</span></div>
-      <input id="fovSlider" type="range" min="40" max="100" value="70" />
-    </div>
-  </div>
+<button id="startBtn">Start VR (camera & motion)</button>
+<div id="stereoWrap">
+  <div class="eyeWin"><video id="videoLeft" class="eyeVideo" autoplay playsinline muted></video></div>
+  <div class="eyeWin"><video id="videoRight" class="eyeVideo" autoplay playsinline muted></video></div>
+</div>
+<canvas id="overlay"></canvas>
+<div id="hint">Double-tap to toggle menu</div>
 
-  <button id="fullscreenBtn" style="display:none">Fullscreen</button>
-  <div id="hint">Double-tap to toggle anchored menu • Tap top to show UI</div>
+<script src="https://cdn.jsdelivr.net/npm/three@0.153.0/build/three.min.js"></script>
+<script src="menu-tracking.js"></script>
+<script src="hand-tracking.js"></script>
+<script>
+const startBtn = document.getElementById('startBtn');
+const videoLeft = document.getElementById('videoLeft');
+const videoRight = document.getElementById('videoRight');
 
-  <div id="portraitOverlay">Please rotate your device to landscape</div>
+async function getRearCameraStream() {
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  const rear = devices.find(d=>d.kind==='videoinput' && /back|rear|environment/i.test(d.label));
+  return navigator.mediaDevices.getUserMedia({
+    video: rear ? { deviceId: { exact: rear.deviceId } } : { facingMode: { ideal: "environment" } },
+    audio:false
+  });
+}
 
-  <div id="stereoWrap" aria-hidden="true">
-    <div id="leftWin" class="eyeWin"><video id="videoLeft" class="eyeVideo" playsinline autoplay muted></video></div>
-    <div id="rightWin" class="eyeWin"><video id="videoRight" class="eyeVideo" playsinline autoplay muted></video></div>
-  </div>
-
-  <canvas id="overlay"></canvas>
-  <div id="domMenuFallback">WebGL not available — menu fallback</div>
-  <div id="debugLog"></div>
-
-  <!-- three (r153) UMD build from CDN — you can replace with local copy if you want -->
-  <script src="https://cdn.jsdelivr.net/npm/three@0.153.0/build/three.min.js"></script>
-
-  <!-- Mediapipe hands: optional CDN (recommended to place .wasm/.data locally if you hit wasm errors).
-       If you host locally, replace with /hands_solution_simd_wasm_bin.js etc. -->
-  <!-- If you prefer TensorFlow.js approach, swap this section and hand-tracking.js accordingly. -->
-  <script>
-    // You may replace the URL below with local copies in your repo if you want offline hosting.
-    // Note: Some browsers (and GitHub Pages) block WASM cross-origin fetches if not hosted correctly.
-    window._MEDIAPIPE_CDN = "https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4";
-    // script will be loaded by hand-tracking.js dynamically (so that fallback works cleanly).
-  </script>
-
-  <!-- main logic: menu + rendering -->
-  <script type="module" src="./menu-tracking.js"></script>
-  <!-- hand tracking separate -->
-  <script type="module" src="./hand-tracking.js"></script>
+startBtn.addEventListener('click', async ()=>{
+  startBtn.style.display='none';
+  try {
+    const stream = await getRearCameraStream();
+    videoLeft.srcObject = stream;
+    videoRight.srcObject = stream;
+    await videoLeft.play();
+    await videoRight.play();
+    initMenuTracking();   // from menu-tracking.js
+    initHandTracking();   // from hand-tracking.js
+  } catch(e) {
+    alert("Camera access failed: "+(e.message||e));
+    console.error(e);
+    startBtn.style.display='block';
+  }
+});
+</script>
 </body>
 </html>
