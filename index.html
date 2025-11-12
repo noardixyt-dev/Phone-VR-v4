@@ -3,42 +3,42 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover" />
-<title>Stereo Passthrough — Rear camera + world-locked menu</title>
+<title>Stereo Passthrough — Rear camera + world-locked menu + hand pointer</title>
 <style>
   :root{
     --ui-bg: rgba(0,0,0,0.45);
     --outline: rgba(255,255,255,0.06);
-    --accent: #1f6feb;
   }
-  html,body{margin:0;padding:0;height:100%;width:100%;background:#000;color:#fff;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial;overflow:hidden}
-  /* Eye windows container: bottom-anchored; windows grow upwards */
-  #stereoWrap{position:fixed;inset:0;display:flex;justify-content:center;align-items:flex-end;gap:var(--gap,12px);padding-bottom:12px;pointer-events:none;z-index:6}
-  .eyeWin{width:var(--eye-w,360px);height:var(--eye-h,240px);border-radius:14px;overflow:hidden;border:2px solid var(--outline);box-shadow:0 10px 30px rgba(0,0,0,0.6);background:#000;position:relative}
-  .eyeVideo{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform-origin:center center; background:#000}
-  /* overlay canvas sits above videos and used to draw 3D menu */
-  canvas#overlay{position:fixed;left:0;top:0;width:100%;height:100%;z-index:10;pointer-events:auto}
-  /* top UI */
-  #controls{position:fixed;left:12px;top:10px;z-index:30;display:flex;gap:10px;align-items:center;pointer-events:auto;transition:opacity .32s,transform .32s}
+  html,body{height:100%;width:100%;margin:0;padding:0;background:#000;color:#fff;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial;overflow:hidden}
+  /* stereo eye windows container */
+  #stereoWrap{
+    position:fixed;inset:0;display:flex;justify-content:center;align-items:center;pointer-events:none;z-index:2;gap:var(--gap,12px);
+    /* note: we center vertically to avoid cutoff when scaling */
+  }
+  .eyeWin{width:var(--eye-w,360px);height:var(--eye-h,240px);border-radius:14px;overflow:hidden;border:2px solid var(--outline);box-shadow:0 6px 22px rgba(0,0,0,0.6);background:#000;position:relative}
+  .eyeVideo{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform-origin:center center}
+  /* overlay canvas for 3D content */
+  canvas#overlay{position:fixed;left:0;top:0;width:100%;height:100%;z-index:10;pointer-events:none;display:block}
+  /* UI */
+  #controls{position:fixed;left:12px;top:10px;z-index:60;display:flex;gap:10px;align-items:center;pointer-events:auto;transition:opacity .32s,transform .32s}
   #controls.hidden{opacity:0;pointer-events:none;transform:translateY(-8px)}
-  .control{background:var(--ui-bg);backdrop-filter:blur(8px);padding:8px;border-radius:8px;font-size:13px;color:#fff}
+  .control{background:var(--ui-bg);backdrop-filter:blur(6px);padding:8px;border-radius:8px;font-size:13px;color:#fff}
   #fovSlider{width:220px}
-  #fullscreenBtn{position:fixed;top:10px;right:10px;z-index:30;padding:8px 12px;border-radius:8px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.06);color:#fff;font-size:14px;pointer-events:auto}
-  #wideToggle{position:fixed;top:10px;right:110px;z-index:30;padding:8px 12px;border-radius:8px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.04);color:#fff;font-size:13px;pointer-events:auto}
-  /* start button */
-  #startBtn{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:50;padding:14px 18px;border-radius:10px;background:#111;color:#fff;border:1px solid rgba(255,255,255,0.06);cursor:pointer}
-  #hint{position:fixed;left:50%;bottom:10px;transform:translateX(-50%);font-size:12px;background:rgba(0,0,0,0.35);padding:8px 12px;border-radius:8px;z-index:30}
-  /* portrait overlay */
-  #portraitOverlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.94);z-index:60;color:#fff;font-size:18px;padding:20px;text-align:center;pointer-events:auto}
-  #portraitOverlay.visible{display:flex}
-  /* small debug (hidden by default) */
-  #dbg{position:fixed;left:12px;bottom:12px;z-index:70;background:rgba(0,0,0,0.6);color:#0f0;font-size:11px;padding:8px;border-radius:6px;white-space:pre-line;display:none}
-  /* palm dot style (rendered in three.js but keep CSS fallback) */
-  .hidden{display:none}
-  /* responsive tweaks */
-  @media (max-width:600px){ #fovSlider{width:160px} }
+  #fullscreenBtn{position:fixed;top:10px;right:10px;z-index:60;padding:8px 12px;border-radius:8px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.06);color:#fff;font-size:14px;pointer-events:auto;display:none}
+  #wideToggle{position:fixed;top:10px;right:110px;z-index:60;padding:8px 12px;border-radius:8px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.06);color:#fff;font-size:14px;pointer-events:auto;display:none}
+  #startBtn{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:80;padding:14px 18px;border-radius:10px;background:#111;color:#fff;border:1px solid rgba(255,255,255,0.06);cursor:pointer}
+  #hint{position:fixed;left:50%;bottom:10px;transform:translateX(-50%);font-size:12px;background:rgba(0,0,0,0.35);padding:6px 10px;border-radius:8px;z-index:60}
+  #portraitOverlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.92);z-index:120;color:#fff;font-size:20px;padding:20px;text-align:center;pointer-events:auto}
+  #debugLog{position:fixed;left:12px;bottom:12px;color:#0f0;background:rgba(0,0,0,0.6);padding:6px;border-radius:6px;font-size:11px;z-index:999;display:none;pointer-events:none}
+  /* small helpers */
+  button{font:inherit;color:inherit}
 </style>
 </head>
 <body>
+  <!-- start button (user gesture) -->
+  <button id="startBtn">Start VR (camera & motion)</button>
+
+  <!-- controls top-left -->
   <div id="controls" class="hidden" style="display:none">
     <div class="control">
       <div style="font-size:12px;margin-bottom:6px">FOV (eye window) <span id="fovVal">70%</span></div>
@@ -46,40 +46,42 @@
     </div>
   </div>
 
-  <button id="fullscreenBtn" style="display:none">Fullscreen</button>
-  <button id="wideToggle" style="display:none" title="Toggle wide camera">Wide cam off</button>
+  <!-- fullscreen top-right -->
+  <button id="fullscreenBtn">Fullscreen</button>
+  <!-- wide camera toggle -->
+  <button id="wideToggle">Use Ultra-Wide</button>
 
-  <button id="startBtn">Start VR (camera & motion)</button>
   <div id="hint">Double-tap to toggle anchored menu • Tap top to show UI</div>
+  <div id="portraitOverlay">Please rotate your device to landscape</div>
 
-  <div id="portraitOverlay">Please rotate your device to landscape for stereo passthrough</div>
-
+  <!-- stereo eye windows: two <video> elements (same stream attached) -->
   <div id="stereoWrap" aria-hidden="true">
     <div id="leftWin" class="eyeWin"><video id="videoLeft" class="eyeVideo" playsinline autoplay muted></video></div>
     <div id="rightWin" class="eyeWin"><video id="videoRight" class="eyeVideo" playsinline autoplay muted></video></div>
   </div>
 
+  <!-- overlay canvas for three.js 3D menu / pointer / hand overlays -->
   <canvas id="overlay"></canvas>
 
-  <!-- three.js from CDN (r153 compatible via UMD build). Keep this external - it's standard. -->
+  <!-- debug text -->
+  <div id="debugLog"></div>
+
+  <!-- dependencies -->
   <script src="https://cdn.jsdelivr.net/npm/three@0.153.0/build/three.min.js"></script>
+  <!-- MediaPipe Hands (optional). We attempt to load — if it fails we degrade gracefully. -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.4/camera_utils.js"></script>
 
 <script>
-/*
-  Single-file stereo passthrough viewer
-  - rear / wide camera selection, attempts highest resolution & fps
-  - two <video> elements get same stream (one per eye), object-fit cover -> fills / crops to 1.5:1 window
-  - three.js overlay renders a world-locked menu (rendered once to texture and reused for both eyes)
-  - tries WebXR 6DOF; falls back to deviceorientation 3DOF (with roll removal)
-  - attempts to load MediaPipe Hands for palm dot + pinch detection; graceful fallback if fails
-  - FOV slider controls eye window scale (bottom anchored, grows upward). When scaled down windows stay centered vertically
-  - UI auto-hide after 10s, reappear on tap-top region
-  - double-tap toggles menu spawn/hide
-*/
+/* ----------------------------------------------------------
+  Stereo Passthrough index.html
+  - Rear camera per-eye (two <video> elements)
+  - World-locked menu (spawn on double-tap), rendered once to texture and reused per eye
+  - Attempts WebXR 6DOF, falls back to deviceorientation
+  - Light-weight MediaPipe hands usage for palm-dot + pinch drag
+  - Single-file: paste into index.html and host (HTTPS recommended)
+----------------------------------------------------------*/
 
-(async ()=>{
-
-/* ---------------- UI references ---------------- */
 const startBtn = document.getElementById('startBtn');
 const controls = document.getElementById('controls');
 const fullscreenBtn = document.getElementById('fullscreenBtn');
@@ -88,245 +90,40 @@ const fovSlider = document.getElementById('fovSlider');
 const fovVal = document.getElementById('fovVal');
 const portraitOverlay = document.getElementById('portraitOverlay');
 const hint = document.getElementById('hint');
+const leftWin = document.getElementById('leftWin');
+const rightWin = document.getElementById('rightWin');
 const videoLeft = document.getElementById('videoLeft');
 const videoRight = document.getElementById('videoRight');
 const overlay = document.getElementById('overlay');
-const leftWin = document.getElementById('leftWin');
-const rightWin = document.getElementById('rightWin');
+const debugLog = document.getElementById('debugLog');
 
 let uiHideTimer = null;
 const UI_HIDE_MS = 10000;
 function showUI(){ controls.style.display='flex'; controls.classList.remove('hidden'); fullscreenBtn.style.display='block'; wideToggle.style.display='block'; resetUIHideTimer(); }
 function hideUI(){ controls.classList.add('hidden'); fullscreenBtn.style.display='none'; wideToggle.style.display='none'; }
 function resetUIHideTimer(){ if(uiHideTimer) clearTimeout(uiHideTimer); uiHideTimer = setTimeout(()=>{ hideUI(); }, UI_HIDE_MS); }
-
-/* top-tap to show UI */
-window.addEventListener('pointerdown', (ev)=>{
-  if (ev.clientY <= 140) showUI();
-});
-
-/* pointer movement keeps UI alive */
 window.addEventListener('pointermove', ()=> resetUIHideTimer(), { passive:true });
-
 controls.addEventListener('pointerdown', ()=> showUI());
 
-/* ---------------- camera selection & start ---------------- */
-
-/* heuristic to pick rear camera deviceId; also returns candidate wide camera id when available */
-async function enumerateVideoInputs(){
-  try { const devs = await navigator.mediaDevices.enumerateDevices(); return devs.filter(d=>d.kind === 'videoinput'); }
-  catch(e){ return []; }
-}
-async function chooseRearAndWideDeviceIds(){
-  const cams = await enumerateVideoInputs();
-  let rear = null, wide = null;
-  for(const c of cams){
-    const L=(c.label||'').toLowerCase();
-    if(!rear && (L.includes('back')||L.includes('rear')||L.includes('environment')||L.includes('main')||L.includes('wide'))) rear = c.deviceId;
-    if(!wide && (L.includes('wide')||L.includes('ultra')||L.includes('ultrawide')||L.includes('0.5')||L.includes('ultra wide'))) wide = c.deviceId;
-  }
-  // fallback picks
-  if(!rear && cams.length) rear = cams[0].deviceId;
-  if(!wide) wide = rear;
-  return { rear, wide };
-}
-
-/* try multiple resolution+fps combos */
-async function startCameraStream(deviceId){
-  const resolutions = [{w:3840,h:2160},{w:1920,h:1080},{w:1280,h:720}];
-  const fpss = [60,30];
-  for(const r of resolutions){
-    for(const f of fpss){
-      try{
-        const constraints = deviceId ? {
-          video: { deviceId: { exact: deviceId }, width: { ideal: r.w }, height: { ideal: r.h }, frameRate: { ideal: f } },
-          audio:false
-        } : {
-          video: { facingMode: { ideal: 'environment' }, width: { ideal: r.w }, height: { ideal: r.h }, frameRate: { ideal: f } },
-          audio:false
-        };
-        const s = await navigator.mediaDevices.getUserMedia(constraints);
-        console.info('got camera', r, f, 'deviceId', deviceId);
-        return s;
-      }catch(err){
-        // try next
-      }
-    }
-  }
-  // fallback generic
-  return navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio:false });
-}
-
-/* state */
+/* core state */
 let stream = null;
-let chosenIds = { rear: null, wide: null };
-let useWide = false;
-
-/* choose devices early */
-chosenIds = await chooseRearAndWideDeviceIds();
-
-/* start flow triggered by start button */
-startBtn.addEventListener('click', async ()=>{
-  startBtn.style.display = 'none';
-  showUI();
-  // try request motion permission for iOS 13+ and others that require explicit call
-  await tryRequestMotionPermission();
-
-  // attempt WebXR to get 6DOF on capable devices; we will still continue even if it is not supported
-  tryInitWebXR();
-
-  // start with rear camera (highest)
-  const deviceToUse = useWide ? chosenIds.wide : chosenIds.rear;
-  try{
-    stream = await startCameraStream(deviceToUse);
-    // attach same stream to both video elements
-    videoLeft.srcObject = stream;
-    videoRight.srcObject = stream;
-    // hidden tiny video elements are fine; ensure play (user gesture satisfied)
-    try { await videoLeft.play(); } catch(e) { console.warn('left play blocked', e); }
-    try { await videoRight.play(); } catch(e) { console.warn('right play blocked', e); }
-    // show UI controls
-    controls.style.display = 'flex';
-    fullscreenBtn.style.display = 'block';
-    wideToggle.style.display = 'block';
-    // init overlay (three)
-    initThreeOverlay();
-    // hide portrait overlay if in landscape
-    updatePortrait();
-  }catch(err){
-    console.error('camera start failed', err);
-    alert('Camera access failed: ' + (err && err.message ? err.message : err));
-    startBtn.style.display = 'block';
-  }
-});
-
-/* fullscreen toggles */
-fullscreenBtn.addEventListener('click', async () => {
-  try{
-    if (!document.fullscreenElement) await document.documentElement.requestFullscreen();
-    else await document.exitFullscreen();
-  }catch(e){}
-  resetUIHideTimer();
-});
-
-/* wide toggle */
-wideToggle.addEventListener('click', async ()=>{
-  useWide = !useWide;
-  wideToggle.textContent = useWide ? 'Wide cam on' : 'Wide cam off';
-  // stop & restart stream with chosen device
-  if (stream){
-    stream.getTracks().forEach(t=>t.stop());
-    stream = null;
-  }
-  const deviceToUse = useWide ? chosenIds.wide : chosenIds.rear;
-  try{
-    stream = await startCameraStream(deviceToUse);
-    videoLeft.srcObject = stream;
-    videoRight.srcObject = stream;
-    try { await videoLeft.play(); } catch(e){}
-    try { await videoRight.play(); } catch(e){}
-  }catch(e){ console.warn('switch wide failed', e); }
-  resetUIHideTimer();
-});
-
-/* portrait overlay / blocking interactions */
-function updatePortrait(){
-  if (window.innerHeight > window.innerWidth){
-    portraitOverlay.classList.add('visible');
-    controls.classList.add('hidden');
-    fullscreenBtn.style.display = 'none';
-    wideToggle.style.display = 'none';
-  } else {
-    portraitOverlay.classList.remove('visible');
-    // restore UI visibility state
-    if (!controls.classList.contains('hidden')) controls.style.display = 'flex';
-    if (controls.style.display !== 'none') fullscreenBtn.style.display = 'block';
-    wideToggle.style.display = 'block';
-  }
-}
-window.addEventListener('resize', ()=> { updatePortrait(); layoutEyes(); if (renderer) { renderer.setSize(window.innerWidth, window.innerHeight); perspectiveBase.aspect = window.innerWidth/window.innerHeight; perspectiveBase.updateProjectionMatrix(); } });
-
-/* ---------------- FOV / eye layout ---------------- */
-let eyeScalePct = parseFloat(fovSlider.value || 70);
+let eyeScalePct = parseFloat(fovSlider.value);
 fovVal.textContent = Math.round(eyeScalePct) + '%';
-fovSlider.addEventListener('input', ()=>{
-  eyeScalePct = parseFloat(fovSlider.value);
-  fovVal.textContent = Math.round(eyeScalePct) + '%';
-  layoutEyes();
-  // update menu scale if visible
-  if(menuMesh) {
-    const baseScale = eyeScalePct / 70;
-    menuMesh.scale.setScalar(baseScale);
-  }
-  resetUIHideTimer();
-});
+let useUltraWide = false; // toggle
+let videoFacingDeviceId = null;
 
-function layoutEyes(){
-  const scale = Math.max(0.3, Math.min(1.0, eyeScalePct/100));
-  let eyeH = Math.round(window.innerHeight * scale);
-  let eyeW = Math.floor(eyeH * 1.5); // 1.5:1
-  let gap = Math.max(8, Math.round(eyeW * 0.06));
-  if (eyeW * 2 + gap > window.innerWidth){
-    const avail = window.innerWidth - gap;
-    eyeW = Math.floor(avail / 2);
-    eyeH = Math.floor(eyeW * 2/3);
-  }
-  // center vertically so they don't sit too low when small
-  // we keep container aligned to flex-end but calculate a vertical centering offset via padding-bottom
-  // compute vertical center offset
-  const totalH = eyeH; // we only care per-window height for centering
-  // set css custom props
-  document.documentElement.style.setProperty('--eye-w', eyeW + 'px');
-  document.documentElement.style.setProperty('--eye-h', eyeH + 'px');
-  document.documentElement.style.setProperty('--gap', gap + 'px');
-
-  // center vertically by adjusting stereoWrap padding-bottom: we want windows centered vertically if smaller
-  // compute available vertical center offset (we favor bottom anchor but move up a bit when small)
-  const bottomPadding = Math.max(8, Math.round((window.innerHeight - eyeH) / 2 - 8));
-  document.getElementById('stereoWrap').style.paddingBottom = bottomPadding + 'px';
-}
-layoutEyes();
-
-/* ---------------- device orientation / 6DOF attempt ---------------- */
-
-/* we'll try WebXR for full 6DOF if supported, otherwise fall back to deviceorientation (3DOF).
-   If WebXR is available we attempt to request an 'inline' viewer or immersive-ar session for 6DOF.
-   We attempt up to a few times; if fails we'll show a brief message (non-blocking).
-*/
-let xrSession = null;
-let xrRefSpace = null;
-let xrSupported = false;
-let attemptedXR = 0;
-const MAX_XR_TRIES = 5;
-
-async function tryInitWebXR(){
-  if (!navigator.xr) return;
-  try{
-    xrSupported = await navigator.xr.isSessionSupported('immersive-ar').catch(()=>false);
-    if (!xrSupported){
-      xrSupported = await navigator.xr.isSessionSupported('immersive-vr').catch(()=>false);
-    }
-    if (xrSupported){
-      console.log('WebXR supported; will attempt to request immersive session if user accepts.');
-      // we don't auto-start immersive session here; we will attempt when menu spawn if user allows.
-    }
-  }catch(e){ console.warn('xr check failed', e); }
-}
-
-/* fallback 3DOF device orientation */
-const zee = new THREE.Vector3(0,0,1);
-const qPortraitToThree = new THREE.Quaternion(-Math.sqrt(0.5),0,0,Math.sqrt(0.5));
+/* orientation & webxr */
 let deviceQuat = new THREE.Quaternion();
 let deviceOrientationEnabled = false;
-const euler = new THREE.Euler();
+const zee = new THREE.Vector3(0,0,1);
+const qPortraitToThree = new THREE.Quaternion(-Math.sqrt(0.5),0,0,Math.sqrt(0.5));
 
 function getScreenOrientationDeg(){ if (screen && screen.orientation && typeof screen.orientation.angle === 'number') return screen.orientation.angle; return window.orientation || 0; }
-
 function setObjectQuaternionFromSensor(quatOut, alpha, beta, gamma){
   const orient = getScreenOrientationDeg();
   const deg = Math.PI/180;
-  euler.set((beta||0)*deg, (alpha||0)*deg, -(gamma||0)*deg, 'YXZ');
-  quatOut.setFromEuler(euler);
+  const e = new THREE.Euler((beta||0)*deg, (alpha||0)*deg, -(gamma||0)*deg, 'YXZ');
+  quatOut.setFromEuler(e);
   let baseRot = new THREE.Quaternion();
   if (orient === 90) baseRot.setFromAxisAngle(zee, -Math.PI/2);
   else if (orient === -90 || orient === 270) baseRot.setFromAxisAngle(zee, Math.PI/2);
@@ -338,150 +135,265 @@ function setObjectQuaternionFromSensor(quatOut, alpha, beta, gamma){
 
 async function enableDeviceOrientation(){
   if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function'){
-    try{
+    try {
       const perm = await DeviceOrientationEvent.requestPermission();
-      if (perm === 'granted'){
-        window.addEventListener('deviceorientation', (ev)=>{ deviceOrientationEnabled=true; setObjectQuaternionFromSensor(deviceQuat, ev.alpha, ev.beta, ev.gamma); }, true);
-      } else {
-        // attempt but permission denied
-        window.addEventListener('deviceorientation', (ev)=>{ deviceOrientationEnabled=true; setObjectQuaternionFromSensor(deviceQuat, ev.alpha, ev.beta, ev.gamma); }, true);
-      }
-    }catch(e){
-      window.addEventListener('deviceorientation', (ev)=>{ deviceOrientationEnabled=true; setObjectQuaternionFromSensor(deviceQuat, ev.alpha, ev.beta, ev.gamma); }, true);
-    }
+      if (perm === 'granted') window.addEventListener('deviceorientation', ev=>{ deviceOrientationEnabled=true; setObjectQuaternionFromSensor(deviceQuat, ev.alpha, ev.beta, ev.gamma); }, true);
+      else window.addEventListener('deviceorientation', ev=>{ deviceOrientationEnabled=true; setObjectQuaternionFromSensor(deviceQuat, ev.alpha, ev.beta, ev.gamma); }, true);
+    } catch(e){ window.addEventListener('deviceorientation', ev=>{ deviceOrientationEnabled=true; setObjectQuaternionFromSensor(deviceQuat, ev.alpha, ev.beta, ev.gamma); }, true); }
   } else {
-    window.addEventListener('deviceorientation', (ev)=>{ deviceOrientationEnabled=true; setObjectQuaternionFromSensor(deviceQuat, ev.alpha, ev.beta, ev.gamma); }, true);
+    window.addEventListener('deviceorientation', ev=>{ deviceOrientationEnabled=true; setObjectQuaternionFromSensor(deviceQuat, ev.alpha, ev.beta, ev.gamma); }, true);
   }
 }
 
-/* request motion permission for iOS 13+ */
-async function tryRequestMotionPermission(){
-  if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function'){
-    try{
-      await DeviceMotionEvent.requestPermission();
-    }catch(e){}
+/* choose rear camera deviceId heuristics */
+async function enumerateVideoInputs(){ try { const devs = await navigator.mediaDevices.enumerateDevices(); return devs.filter(d=>d.kind==='videoinput'); } catch(e) { return []; } }
+async function chooseRearDeviceId(){
+  const cams = await enumerateVideoInputs();
+  for (const c of cams){
+    const L = (c.label||'').toLowerCase();
+    if (L.includes('back') || L.includes('rear') || L.includes('environment') || L.includes('main') || L.includes('wide')) return c.deviceId;
   }
-  // also enable deviceorientation listener
-  enableDeviceOrientation();
+  for (const c of cams){
+    const L = (c.label||'').toLowerCase();
+    if (!L.includes('front') && !L.includes('selfie')) return c.deviceId;
+  }
+  return cams.length ? cams[0].deviceId : null;
 }
 
-/* ---------------- three.js overlay + menu rendering (single pass duplicated) ---------------- */
+/* request camera with best settings (res + fps) */
+async function startCameraStream(preferId=null){
+  const deviceId = preferId || await chooseRearDeviceId();
+  const resolutions = [{w:3840,h:2160},{w:1920,h:1080},{w:1280,h:720}];
+  const fpsCandidates = [60,30];
+  for (const r of resolutions){
+    for (const f of fpsCandidates){
+      try {
+        const constraints = deviceId
+          ? { video: { deviceId: { exact: deviceId }, width:{ ideal: r.w }, height:{ ideal: r.h }, frameRate:{ ideal: f } }, audio: false }
+          : { video: { facingMode: { ideal: 'environment' }, width:{ ideal: r.w }, height:{ ideal: r.h }, frameRate:{ ideal: f } }, audio: false };
+        const s = await navigator.mediaDevices.getUserMedia(constraints);
+        return { stream: s, deviceId: deviceId };
+      } catch(e) { /* try next */ }
+    }
+  }
+  // final fallback
+  const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+  return { stream: s, deviceId: deviceId };
+}
 
-let renderer = null, scene3D = null, perspectiveBase = null, camLeft = null, camRight = null;
-let menuMesh = null, menuBarMesh = null;
-let rtMenu = null; // render target to render menu once then re-use
+/* start button flow */
+startBtn.addEventListener('click', async ()=>{
+  startBtn.style.display = 'none';
+  await enableDeviceOrientation();
+  showUI();
+  try {
+    const tryId = await chooseRearDeviceId();
+    const res = await startCameraStream(tryId);
+    stream = res.stream;
+    videoFacingDeviceId = res.deviceId;
+    // attach same stream to both videos
+    videoLeft.srcObject = stream;
+    videoRight.srcObject = stream;
+    // make them play
+    try { await videoLeft.play(); } catch(e) { console.warn('left play blocked', e); }
+    try { await videoRight.play(); } catch(e) { console.warn('right play blocked', e); }
+    // reveal UI
+    controls.style.display = 'flex';
+    fullscreenBtn.style.display = 'block';
+    wideToggle.style.display = 'block';
+    // init overlay and 3D
+    initThreeOverlay();
+    // try optional MediaPipe hands init
+    tryInitHands();
+  } catch(err){
+    console.error('camera start failed', err);
+    alert('Camera access failed: ' + (err && err.message ? err.message : err));
+    startBtn.style.display = 'block';
+  }
+});
+
+/* toggle ultra-wide (requests switching to a different device id if available) */
+wideToggle.addEventListener('click', async ()=>{
+  useUltraWide = !useUltraWide;
+  wideToggle.textContent = useUltraWide ? 'Use Main' : 'Use Ultra-Wide';
+  // attempt to find a candidate camera with "wide" or "ultra" in label
+  const cams = await enumerateVideoInputs();
+  let candidate = null;
+  for (const c of cams){
+    const L=(c.label||'').toLowerCase();
+    if (useUltraWide && (L.includes('ultra') || L.includes('wide') || L.includes('0.5') || L.includes('wide-angle'))) { candidate = c.deviceId; break; }
+    if (!useUltraWide && (L.includes('back')||L.includes('rear')||L.includes('main'))) { candidate = c.deviceId; /* keep looking for main */ }
+  }
+  // if candidate found, switch stream (best-effort, quick fade)
+  if (candidate){
+    try {
+      // fade overlay (simple)
+      overlay.style.transition = 'opacity .18s'; overlay.style.opacity = '0';
+      const { stream: newStream } = await startCameraStream(candidate);
+      // replace tracks in existing stream to avoid re-creating elements
+      const newTrack = newStream.getVideoTracks()[0];
+      const oldTrack = stream.getVideoTracks()[0];
+      // attempt replaceTrack on each sender if possible (works in RTCPeerConnection) - fallback to reassign srcObject:
+      // Easiest: just set new srcObject
+      stream = newStream;
+      videoLeft.srcObject = stream; videoRight.srcObject = stream;
+      try { await videoLeft.play(); await videoRight.play(); } catch(e){}
+      setTimeout(()=> overlay.style.opacity = '1', 180);
+    } catch(e){ console.warn('switch wide failed', e); }
+  } else {
+    // if no device candidate, just toggle flag (no change)
+    console.log('no alternative camera found for ultra-wide.');
+  }
+  resetUIHideTimer();
+});
+
+/* fullscreen */
+fullscreenBtn.addEventListener('click', ()=> {
+  if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+  else document.exitFullscreen();
+  resetUIHideTimer();
+});
+
+/* FOV slider */
+fovSlider.addEventListener('input', ()=>{
+  eyeScalePct = parseFloat(fovSlider.value);
+  fovVal.textContent = Math.round(eyeScalePct) + '%';
+  layoutEyes();
+  // scale menu accordingly
+  if (menuMesh) {
+    const s = Math.max(0.5, eyeScalePct / 70);
+    menuMesh.scale.setScalar(s);
+  }
+  resetUIHideTimer();
+});
+
+/* portrait overlay handling */
+function updatePortrait(){
+  if (window.innerHeight > window.innerWidth) {
+    portraitOverlay.style.display = 'flex';
+    controls.classList.add('hidden');
+    fullscreenBtn.style.display = 'none';
+    wideToggle.style.display = 'none';
+  } else {
+    portraitOverlay.style.display = 'none';
+    // restore UI
+    if (!controls.classList.contains('hidden')) controls.style.display='flex';
+    fullscreenBtn.style.display = controls.style.display !== 'none' ? 'block' : 'none';
+    wideToggle.style.display = controls.style.display !== 'none' ? 'block' : 'none';
+  }
+}
+
+/* layout eyes: center vertically (so scaling moves windows toward middle) */
+function layoutEyes(){
+  const scale = Math.max(0.3, Math.min(1.0, eyeScalePct/100));
+  let eyeH = Math.round(window.innerHeight * scale);
+  let eyeW = Math.floor(eyeH * 1.5);
+  let gap = Math.max(8, Math.round(eyeW * 0.06));
+  if (eyeW * 2 + gap > window.innerWidth){
+    const avail = window.innerWidth - gap;
+    eyeW = Math.floor(avail / 2);
+    eyeH = Math.floor(eyeW * 2/3);
+  }
+  document.documentElement.style.setProperty('--eye-w', eyeW + 'px');
+  document.documentElement.style.setProperty('--eye-h', eyeH + 'px');
+  document.documentElement.style.setProperty('--gap', gap + 'px');
+}
+
+/* compute NDC helper */
+function screenToNDC(x,y){ return new THREE.Vector2((x/window.innerWidth)*2 - 1, - (y/window.innerHeight)*2 + 1); }
+
+/* ------------------ THREE overlay (single-pass render to texture) ------------------ */
+let renderer, scene3D, perspectiveBase, camLeft, camRight, rtMenu, menuMesh, menuBar;
 const FIXED_IPD = 0.064;
+let menuVisible = false;
 
 function initThreeOverlay(){
-  // configure renderer to use existing canvas overlay
+  // renderer using canvas 'overlay'
   renderer = new THREE.WebGLRenderer({ canvas: overlay, antialias: true, alpha: true });
   renderer.setPixelRatio(window.devicePixelRatio || 1);
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.autoClear = false;
 
-  // scene and lighting
   scene3D = new THREE.Scene();
   scene3D.add(new THREE.AmbientLight(0xffffff, 0.9));
-  const dl = new THREE.DirectionalLight(0xffffff, 0.25);
-  dl.position.set(1,2,2);
-  scene3D.add(dl);
+  const dl = new THREE.DirectionalLight(0xffffff, 0.3); dl.position.set(1,2,2); scene3D.add(dl);
 
-  // cameras
-  perspectiveBase = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 1000);
-  camLeft = perspectiveBase.clone();
-  camRight = perspectiveBase.clone();
+  perspectiveBase = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 1000);
+  camLeft = perspectiveBase.clone(); camRight = perspectiveBase.clone();
 
-  // create a nice menu: frosted glass look (simple approximation)
-  const boxG = new THREE.BoxGeometry(0.9, 0.5, 0.02); // larger; user wanted big like 25" at 1m
-  const boxM = new THREE.MeshStandardMaterial({
-    color: 0xffffff,
-    metalness: 0.0,
-    roughness: 0.6,
-    transparent: true,
-    opacity: 0.14,
-    envMapIntensity: 0.3
-  });
+  // menu geometry (frosted pill style)
+  const boxG = new THREE.BoxGeometry(0.9, 0.55, 0.02);
+  const boxM = new THREE.MeshStandardMaterial({ color:0x112233, roughness:0.5, metalness:0.1, transparent:true, opacity:0.92, emissive:0x001020 });
   menuMesh = new THREE.Mesh(boxG, boxM);
   menuMesh.visible = false;
+  menuMesh.userData.spawned = false;
   scene3D.add(menuMesh);
 
-  // add subtle inner panel (frost + accent)
-  const innerG = new THREE.PlaneGeometry(0.78, 0.42);
-  const innerM = new THREE.MeshStandardMaterial({ color: 0xf8fbff, transparent:true, opacity:0.06 });
-  const inner = new THREE.Mesh(innerG, innerM);
-  inner.position.set(0,0,0.011);
-  menuMesh.add(inner);
+  // bottom drag pill
+  const pillG = new THREE.BoxGeometry(0.5, 0.05, 0.001);
+  const pillM = new THREE.MeshStandardMaterial({ color:0xffffff, transparent:true, opacity:0.9 });
+  menuBar = new THREE.Mesh(pillG, pillM);
+  menuBar.position.set(0, -0.55/2 - 0.04, 0.011);
+  menuMesh.add(menuBar);
 
-  // pill drag bar
-  const barG = new THREE.BoxGeometry(0.36, 0.04, 0.001);
-  const barM = new THREE.MeshStandardMaterial({ color:0xffffff, transparent:true, opacity:0.9 });
-  menuBarMesh = new THREE.Mesh(barG, barM);
-  menuBarMesh.position.set(0, -0.22, 0.012);
-  menuMesh.add(menuBarMesh);
+  // small "glass" effect by adding a blurred plane (performance-friendly subtle)
+  const glassG = new THREE.PlaneGeometry(0.9, 0.55);
+  const glassM = new THREE.MeshBasicMaterial({ color:0xffffff, transparent:true, opacity:0.03 });
+  const glassPlane = new THREE.Mesh(glassG, glassM);
+  glassPlane.position.set(0,0,0.009);
+  menuMesh.add(glassPlane);
 
-  // render target for single-pass menu
-  rtMenu = new THREE.WebGLRenderTarget(1024, 1024, { minFilter:THREE.LinearFilter, magFilter:THREE.LinearFilter, format:THREE.RGBAFormat });
+  // render target for single pass menu rendering
+  rtMenu = new THREE.WebGLRenderTarget(Math.floor(window.innerWidth * Math.min(1, window.devicePixelRatio || 1)), Math.floor(window.innerHeight * Math.min(1, window.devicePixelRatio || 1)), { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, format: THREE.RGBAFormat });
 
-  // compute viewports once
-  computeViewports(); // sets left/right outlines etc.
-  animate(); // start loop
-  window.addEventListener('resize', onResize);
+  // input events for double-tap and dragging
+  window.addEventListener('pointerdown', overlayPointerDown, { passive:true });
+  window.addEventListener('pointermove', overlayPointerMove, { passive:true });
+  window.addEventListener('pointerup', overlayPointerUp, { passive:true });
+
+  // resize handler
+  window.addEventListener('resize', ()=>{
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    perspectiveBase.aspect = window.innerWidth/window.innerHeight; perspectiveBase.updateProjectionMatrix();
+    layoutEyes(); updatePortrait();
+  });
+
+  // start rendering
+  layoutEyes(); updatePortrait();
+  requestAnimationFrame(animate);
 }
 
-/* computeViewports uses DOM eye window sizes which are dynamically set by CSS variables */
-function computeViewports(){
-  // nothing heavy to compute here, we're using DOM rects in the render loop
-  layoutEyes();
-}
-
-function onResize(){
-  if (!renderer) return;
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  if (perspectiveBase){ perspectiveBase.aspect = window.innerWidth/window.innerHeight; perspectiveBase.updateProjectionMatrix(); }
-}
-
-/* Menu spawn/hide with pop animation; world-locked spawn at current forward direction */
-const MENU_DISTANCE = 1.4;
+/* spawn/hide menu functions (world-locked) */
 function spawnMenu(){
   if (!menuMesh) return;
-  // compute forward in world (deviceQuat represents orientation)
-  const forward = new THREE.Vector3(0,0,-1);
-  if (deviceOrientationEnabled) forward.applyQuaternion(deviceQuat);
-  // spawn position relative to camera at origin
-  const spawnPos = forward.clone().multiplyScalar(MENU_DISTANCE);
+  // compute forward vector using deviceQuat if available (camera placed at origin)
+  const fw = new THREE.Vector3(0,0,-1);
+  if (deviceOrientationEnabled) fw.applyQuaternion(deviceQuat);
+  const spawnPos = fw.clone().multiplyScalar(1.2); // ~1.2m in front
   menuMesh.position.copy(spawnPos);
-  // face horizontally toward origin (camera at origin)
+  // face horizontally toward origin
   const toCam = new THREE.Vector3().subVectors(new THREE.Vector3(0,0,0), menuMesh.position);
-  toCam.y = 0;
+  toCam.y = 0; // keep horizontal
   menuMesh.lookAt(menuMesh.position.clone().add(toCam));
   menuMesh.up.set(0,1,0);
-  // scale according to FOV slider so menu appears large enough
-  const baseScale = eyeScalePct / 70;
+  // scale based on FOV slider
+  const baseScale = Math.max(0.5, eyeScalePct / 70);
   menuMesh.scale.setScalar(baseScale);
   menuMesh.visible = true;
-  popScale(menuMesh, baseScale, 260);
+  menuMesh.userData.spawned = true;
+  menuVisible = true;
+  popScale(menuMesh, baseScale, 240);
 }
-
 function hideMenu(){
   if (!menuMesh) return;
   shrinkHide(menuMesh, 160);
+  menuVisible = false;
 }
 
-let lastTap = 0;
-window.addEventListener('pointerdown', (ev)=>{
-  const now = Date.now();
-  if (now - lastTap < 300){
-    // double tap toggles menu
-    if (!menuMesh) return;
-    if (!menuMesh.visible) spawnMenu(); else hideMenu();
-  }
-  lastTap = now;
-  resetUIHideTimer();
-});
-
-/* pop / shrink helpers */
-function popScale(obj, target=1, dur=240){
-  const start = performance.now(); const sx = obj.scale.x;
+/* easing helpers */
+function popScale(obj, target, dur=220){
+  const start = performance.now();
+  const sx = obj.scale.x;
   function step(now){
     const t = Math.min(1, (now - start)/dur);
     const e = 1 - Math.pow(1 - t, 3);
@@ -492,306 +404,355 @@ function popScale(obj, target=1, dur=240){
   requestAnimationFrame(step);
 }
 function shrinkHide(obj, dur=160){
-  const start = performance.now(); const sx = obj.scale.x;
+  const start = performance.now();
+  const sx = obj.scale.x;
   function step(now){
     const t = Math.min(1, (now - start)/dur);
     const e = Math.pow(1 - t, 2);
     obj.scale.setScalar(sx * e);
     if (t < 1) requestAnimationFrame(step);
-    else { obj.visible = false; obj.scale.setScalar(sx); }
+    else { obj.visible=false; obj.scale.setScalar(sx); }
   }
   requestAnimationFrame(step);
 }
 
-/* drag pill handling (touch/mouse) - move menu along camera plane */
-let dragging=false, dragState=null;
+/* drag menu via menuBar using pointer events (touch works) */
+let dragging=false, dragStart=null, dragCam=null;
 const raycaster = new THREE.Raycaster();
-function screenToNDC(x,y){ return new THREE.Vector2((x/window.innerWidth)*2 - 1, - (y/window.innerHeight)*2 + 1); }
+function overlayPointerDown(e){
+  const now = Date.now();
+  // double-tap detection for spawning/hiding menu
+  if (now - (overlayPointerDown.lastTap || 0) < 300){ toggleMenu(); }
+  overlayPointerDown.lastTap = now;
 
-window.addEventListener('pointerdown', (e)=>{
   if (!menuMesh || !menuMesh.visible) return;
+  // test intersection with menuBar
   const ndc = screenToNDC(e.clientX, e.clientY);
   raycaster.setFromCamera(ndc, camLeft);
-  const hits = raycaster.intersectObject(menuBarMesh, true);
+  const hits = raycaster.intersectObject(menuBar, true);
   if (hits.length > 0){
-    dragging = true;
-    dragState = { startX: e.clientX, startY: e.clientY, startPos: menuMesh.position.clone(), cam: perspectiveBase };
+    dragging = true; dragStart = { x: e.clientX, y: e.clientY, startPos: menuMesh.position.clone() }; dragCam = perspectiveBase;
   }
-}, { passive:true });
-
-window.addEventListener('pointermove', (e)=>{
-  if (!dragging || !dragState) return;
+}
+function overlayPointerMove(e){
+  if (!dragging || !dragStart) return;
   const ndcNow = screenToNDC(e.clientX, e.clientY);
-  const ndcThen = screenToNDC(dragState.startX, dragState.startY);
+  const ndcThen = screenToNDC(dragStart.x, dragStart.y);
   const delta = ndcNow.clone().sub(ndcThen);
-  const cam = dragState.cam;
-  const distance = menuMesh.position.length() || MENU_DISTANCE;
+  const cam = dragCam;
+  const distance = menuMesh.position.length() || 1.2;
   const vFov = cam.fov * Math.PI/180;
   const worldH = 2 * Math.tan(vFov/2) * distance;
   const worldW = worldH * cam.aspect;
   const worldDelta = new THREE.Vector3(-delta.x * worldW/2, -delta.y * worldH/2, 0);
   worldDelta.applyQuaternion(cam.quaternion);
-  menuMesh.position.copy(dragState.startPos.clone().add(worldDelta));
-}, { passive:true });
-
-window.addEventListener('pointerup', ()=>{ dragging=false; dragState=null; }, { passive:true });
-
-/* hover pulse: center gaze check to visually indicate menu bar interactive state */
-function hoverPulse(){
-  if (!menuMesh || !menuMesh.visible) return;
-  const ndc = new THREE.Vector2(0,0);
-  raycaster.setFromCamera(ndc, camLeft);
-  const hits = raycaster.intersectObject(menuBarMesh, true);
-  if (hits.length > 0){
-    menuBarMesh.material.opacity = 1.0;
-    menuBarMesh.material.emissive = new THREE.Color(0xaaaaaa);
-  } else {
-    menuBarMesh.material.opacity = 0.9;
-    menuBarMesh.material.emissive = new THREE.Color(0x000000);
-  }
+  menuMesh.position.copy(dragStart.startPos.clone().add(worldDelta));
 }
+function overlayPointerUp(e){ dragging=false; dragStart=null; }
 
-/* main render loop */
+/* toggle menu */
+function toggleMenu(){ if (!menuMesh) return; if (!menuMesh.visible) spawnMenu(); else hideMenu(); }
+
+/* animate loop: single pass menu render (to RT) then show RT for both eyes */
 function animate(){
   requestAnimationFrame(animate);
   if (!renderer) return;
 
-  // set base camera quaternion from device orientation if no WebXR
-  if (deviceOrientationEnabled && perspectiveBase) perspectiveBase.quaternion.copy(deviceQuat);
-  else if (perspectiveBase) perspectiveBase.quaternion.identity();
+  // update base camera orientation from device sensors if available
+  if (deviceOrientationEnabled) perspectiveBase.quaternion.copy(deviceQuat);
+  else perspectiveBase.quaternion.identity();
 
-  // single-pass approach: render scene3D once into rtMenu from left eye pose, then draw twice with left/right x offsets
-  // But for a believable stereo look we keep small IPD offset of cameras and render twice; to save cycles we render the menu to texture once (approx)
-  // Here we render scene3D once to rtMenu using perspectiveBase, then render into each eye viewport using the rtMenu as a screen overlay quad.
-  // For simplicity we will render scene3D directly into the scissored eye viewport (two passes) but we avoid heavy post-processing.
+  // always make menu face camera horizontally while keeping its world position (no position update)
+  if (menuMesh && menuMesh.visible){
+    const camPos = new THREE.Vector3(0,0,0);
+    const toCam = camPos.clone().sub(menuMesh.position);
+    toCam.y = 0;
+    menuMesh.lookAt(menuMesh.position.clone().add(toCam));
+    menuMesh.up.set(0,1,0);
+  }
 
-  // compute DOM rects for eye windows
+  // --- single-pass: render scene3D to RT once from perspectiveBase (center eye) ---
+  renderer.setRenderTarget(rtMenu);
+  renderer.setViewport(0,0,rtMenu.width,rtMenu.height);
+  renderer.clear(true, true, true);
+  renderer.render(scene3D, perspectiveBase);
+  renderer.setRenderTarget(null);
+
+  // now draw the RT into each eye viewport (as textured quad) by simply rendering the RT texture on a full-screen plane
+  // We'll reuse a simple full-screen scene to draw the RT into the correct scissor/viewport for each eye
+  // For performance we don't recreate objects every frame; we create a simple material and mesh once.
+  renderRTToEyes();
+
+  // hover pulse (center gaze) visual feedback
+  hoverPulse();
+
+  // (hand pointer update is handled elsewhere)
+}
+
+/* ---------- Small helper: renderRTToEyes by drawing a screen-aligned quad using an orthographic camera ---------- */
+let fsScene = null, fsCamera = null, fsMesh = null;
+function ensureFullScreenQuad(){
+  if (fsScene) return;
+  fsScene = new THREE.Scene();
+  fsCamera = new THREE.OrthographicCamera(-1,1,1,-1,0,1);
+  const geom = new THREE.PlaneGeometry(2,2);
+  const mat = new THREE.MeshBasicMaterial({ map: rtMenu.texture });
+  fsMesh = new THREE.Mesh(geom, mat);
+  fsScene.add(fsMesh);
+}
+function renderRTToEyes(){
+  ensureFullScreenQuad();
   const leftRect = leftWin.getBoundingClientRect();
   const rightRect = rightWin.getBoundingClientRect();
   const leftViewportY = window.innerHeight - leftRect.top - leftRect.height;
 
   renderer.setScissorTest(true);
 
-  // left eye render
+  // left eye: draw RT textured quad into the eye's scissor/viewport
   renderer.setScissor(leftRect.left, leftViewportY, leftRect.width, leftRect.height);
   renderer.setViewport(leftRect.left, leftViewportY, leftRect.width, leftRect.height);
-  renderer.clear();
-  camLeft.position.set(-FIXED_IPD/2, 0, 0);
-  camLeft.quaternion.copy(perspectiveBase.quaternion);
-  camLeft.updateMatrixWorld();
-  renderer.clearDepth();
-  renderer.render(scene3D, camLeft);
+  renderer.clear(false, true, true);
+  renderer.render(fsScene, fsCamera);
 
   // right eye
   const rightViewportY = window.innerHeight - rightRect.top - rightRect.height;
   renderer.setScissor(rightRect.left, rightViewportY, rightRect.width, rightRect.height);
   renderer.setViewport(rightRect.left, rightViewportY, rightRect.width, rightRect.height);
-  camRight.position.set(FIXED_IPD/2, 0, 0);
-  camRight.quaternion.copy(perspectiveBase.quaternion);
-  camRight.updateMatrixWorld();
-  renderer.clearDepth();
-  renderer.render(scene3D, camRight);
+  renderer.clear(false, true, true);
+  renderer.render(fsScene, fsCamera);
 
   renderer.setScissorTest(false);
-
-  // update hover pulse for menubar
-  hoverPulse();
-
-  // update possible palm pointer visuals (MediaPipe-driven)
-  if (palmPointerVisible) updatePalmVisual();
 }
 
-/* ---------------- MediaPipe / hand tracking (optional) ----------------
-   We try to load @mediapipe/hands via CDN. If it fails we gracefully continue.
-   Behavior:
-   - detects palm center (approx average of keypoints) and pinch gestures
-   - projects a dot from palm into world and renders a small three.js sprite for both eyes
-*/
-let mpHandsAvailable = false;
-let hands = null;
-let mpCameraVideoTrack = null;
-let palmPointerVisible = false;
-let palm3DMesh = null;
-let palmNormalized = null;
-let lastPinch = false;
+/* hover pulse center-of-screen (for menuBar) */
+function hoverPulse(){
+  if (!menuMesh || !menuMesh.visible) return;
+  const ndc = new THREE.Vector2(0,0);
+  raycaster.setFromCamera(ndc, perspectiveBase);
+  const hits = raycaster.intersectObject(menuBar, true);
+  if (hits.length > 0){
+    menuBar.material.opacity = 1.0;
+    menuBar.material.emissive = new THREE.Color(0x808080);
+  } else {
+    menuBar.material.opacity = 0.9;
+    menuBar.material.emissive = new THREE.Color(0x000000);
+  }
+}
 
-/* attempt to load MediaPipe hands from CDN; if fails we just log and continue */
-async function tryLoadMediaPipeHands(){
-  // NOTE: loading mediapipe via CDN requires multiple files (js + wasm + data). Many CDNs host them.
-  // We'll attempt to load the library and initialize the solution. If the environment blocks wasm fetch or CORS, it may fail.
-  try{
-    // dynamic import of mediapipe hands via unpkg / jsdelivr
-    // this script expects the global 'Hands' constructor available; we load the official bundle if reachable.
-    await loadScript('https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.min.js');
-    await loadScript('https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.4.0/drawing_utils.min.js'); // optional, for diagnostics
-    // create hands instance
-    hands = new Hands({locateFile: (file) => {
-      // attempt to map to jsdelivr paths for wasm & bin files
-      const base = 'https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/';
-      return base + file;
-    }});
-    hands.setOptions({
+/* ---------- MediaPipe Hands light integration (palm dot + pinch) ---------- */
+let handsSolver = null;
+let mpCamera = null;
+let latestHands = null;
+let pointer3D = new THREE.Mesh(new THREE.SphereGeometry(0.02, 12, 12), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+pointer3D.visible = false;
+if (typeof THREE !== 'undefined') pointer3D.frustumCulled = false; // keep always
+
+async function tryInitHands(){
+  // If MediaPipe Hands isn't loaded (404 or blocked), we bail out gracefully.
+  if (typeof window.Hands === 'undefined'){
+    console.warn('MediaPipe Hands not available; hand tracking disabled.');
+    debug('hand tracking disabled: MediaPipe not loaded');
+    return;
+  }
+
+  try {
+    handsSolver = new Hands({
+      locateFile: (file) => {
+        // CDN resolves automatically - the library will load wasm & data relative to this base
+        return `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/${file}`;
+      }
+    });
+    handsSolver.setOptions({
+      selfieMode: false,
       maxNumHands: 2,
       modelComplexity: 1,
       minDetectionConfidence: 0.6,
-      minTrackingConfidence: 0.5
+      minTrackingConfidence: 0.6
     });
-    hands.onResults(onHandsResults);
-    mpHandsAvailable = true;
-    console.log('MediaPipe Hands loaded');
-    // start feeding frames (we will process videoLeft frames)
-    startHandsProcessing();
-  }catch(e){
-    console.warn('MediaPipe Hands load failed:', e);
-    mpHandsAvailable = false;
-  }
-}
+    handsSolver.onResults(onHandsResults);
 
-/* helper to dynamically load an external script */
-function loadScript(src){
-  return new Promise((res, rej)=>{
-    const s = document.createElement('script');
-    s.src = src;
-    s.onload = ()=> res();
-    s.onerror = (err)=> rej(err);
-    document.head.appendChild(s);
-  });
-}
+    // we use an offscreen video element to feed the solver (same stream but downscaled for perf)
+    const camVideo = document.createElement('video');
+    camVideo.style.display='none';
+    camVideo.playsInline = true;
+    camVideo.muted = true;
+    document.body.appendChild(camVideo);
 
-/* process frames from video element via requestVideoFrameCallback if available, else interval */
-let handsFrameHandle = null;
-function startHandsProcessing(){
-  if (!mpHandsAvailable || !videoLeft) return;
-  const process = async ()=>{
-    if (!hands || !videoLeft || videoLeft.readyState < 2) return;
-    try{
-      await hands.send({image: videoLeft});
-    }catch(e){ console.warn('hands.send failed', e); }
-  };
-  if (videoLeft.requestVideoFrameCallback){
-    const cb = (now, meta)=>{
-      process();
-      videoLeft.requestVideoFrameCallback(cb);
-    };
-    videoLeft.requestVideoFrameCallback(cb);
-  } else {
-    handsFrameHandle = setInterval(process, 1000/20);
-  }
-}
+    // attach a camera utils wrapper that calls handsSolver.send on each frame
+    mpCamera = new Camera(camVideo, {
+      onFrame: async () => {
+        try {
+          await handsSolver.send({ image: camVideo });
+        } catch(e) {
+          // sometimes the wasm fails on older devices; fallback gracefully
+          console.warn('hands send failed', e);
+        }
+      },
+      width: 640,
+      height: 360
+    });
 
-/* callback when MediaPipe hands returns results */
-function onHandsResults(results){
-  if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0){
-    palmPointerVisible = false;
-    return;
-  }
-  // pick first detected hand for palm pointer
-  const lm = results.multiHandLandmarks[0];
-  // compute palm center approx (use wrist+index_mcp+middle_mcp average)
-  const wrist = lm[0], indexMcp = lm[5], middleMcp = lm[9];
-  const px = (wrist.x + indexMcp.x + middleMcp.x) / 3;
-  const py = (wrist.y + indexMcp.y + middleMcp.y) / 3;
-  const pz = (wrist.z + indexMcp.z + middleMcp.z) / 3;
-  palmNormalized = { x: px, y: py, z: pz };
-  palmPointerVisible = true;
-
-  // pinch detection: distance between thumb tip (4) and index tip (8)
-  const thumb = lm[4], indexTip = lm[8];
-  const dx = thumb.x - indexTip.x, dy = thumb.y - indexTip.y, dz = (thumb.z||0) - (indexTip.z||0);
-  const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
-  const pinch = dist < 0.05; // threshold tuned experimentally
-  if (pinch && !lastPinch){
-    // trigger pinch-down (click)
-    onPalmPinch(true);
-  } else if (!pinch && lastPinch){
-    onPalmPinch(false);
-  }
-  lastPinch = pinch;
-}
-
-/* palm pinch handler - used as pointer click */
-function onPalmPinch(down){
-  // if menu visible and palm pointer intersects menu, treat as click / drag
-  if (!menuMesh || !menuMesh.visible) return;
-  // project normalized palm (video space) into NDC -> raycast and detect menu intersection
-  // normalized coordinates from MediaPipe: x,y in [0,1], origin top-left
-  const p = palmNormalized;
-  if (!p) return;
-  const x = (p.x * window.innerWidth);
-  const y = (p.y * window.innerHeight);
-  // convert to NDC
-  const ndc = new THREE.Vector2((x / window.innerWidth) * 2 - 1, - (y / window.innerHeight) * 2 + 1);
-  raycaster.setFromCamera(ndc, camLeft);
-  const hits = raycaster.intersectObject(menuMesh, true);
-  if (hits.length > 0){
-    // if pinch down -> initiate drag; else release
-    if (down) {
-      // start drag imitation: save state
-      dragging = true;
-      dragState = { startX: x, startY: y, startPos: menuMesh.position.clone(), cam: perspectiveBase };
+    // start camera for the hand solver using same stream (but downscaled if needed)
+    if (stream){
+      camVideo.srcObject = stream;
+      try { await camVideo.play(); } catch(e){ console.warn('hands cam play failed', e); }
+      mpCamera.start();
+      debug('hand tracking enabled (MediaPipe)');
+      // attach pointer to scene3D for rendering
+      if (scene3D && pointer3D) scene3D.add(pointer3D);
     } else {
-      dragging = false;
-      dragState = null;
+      console.warn('no main stream available for hands solver');
     }
+  } catch(e){
+    console.warn('init hands failed', e);
+    debug('hand tracking init failed');
   }
 }
 
-/* palm visual rendering as small sprite in three.js */
-function ensurePalmVisual(){
-  if (!scene3D || palm3DMesh) return;
-  const sprGeo = new THREE.SphereGeometry(0.01, 8, 8);
-  const sprMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-  palm3DMesh = new THREE.Mesh(sprGeo, sprMat);
-  scene3D.add(palm3DMesh);
-}
+/* process MediaPipe results: compute palm center + pinch */
+function onHandsResults(results){
+  latestHands = results.multiHandLandmarks || [];
+  // compute hand palm center (average of wrist and MCPs)
+  if (latestHands.length > 0){
+    // use first hand for pointer
+    const landmarks = latestHands[0];
+    // palm center approximated by average of wrist(0) and palm mcp points (1..4)
+    const idx = [0,1,5,9,13,17];
+    let cx=0, cy=0, cz=0;
+    idx.forEach(i => { cx += landmarks[i].x; cy += landmarks[i].y; cz += landmarks[i].z; });
+    cx /= idx.length; cy /= idx.length; cz /= idx.length;
+    // MediaPipe coords are normalized (0..1) image coordinates with origin top-left.
+    // We'll convert the normalized image point to screen coords and then to a 3D point on the menu plane by raycasting.
+    // Determine screen pixel:
+    const videoRect = videoLeft.getBoundingClientRect();
+    const sx = videoRect.left + cx * videoRect.width;
+    const sy = videoRect.top + cy * videoRect.height;
+    // project a ray from center-eye camera and set pointer3D to the intersection with menu plane OR a fixed distance
+    if (menuMesh && menuMesh.visible){
+      // ray from center eye
+      const ndc = screenToNDC(sx, sy);
+      raycaster.setFromCamera(ndc, perspectiveBase);
+      const hits = raycaster.intersectObject(menuMesh, true);
+      if (hits.length > 0){
+        pointer3D.position.copy(hits[0].point);
+      } else {
+        // put pointer at fixed distance along ray
+        const ray = raycaster.ray;
+        const p = ray.origin.clone().add(ray.direction.clone().multiplyScalar(1.6)); // 1.6m default
+        pointer3D.position.copy(p);
+      }
+      pointer3D.visible = true;
+    } else {
+      pointer3D.visible = false;
+    }
 
-/* update palm visual position projected into 3D at a default pointer distance, but if it intersects menu snap to correct point */
-function updatePalmVisual(){
-  if (!palmPointerVisible || !palmNormalized) {
-    if (palm3DMesh) palm3DMesh.visible = false;
-    return;
-  }
-  ensurePalmVisual();
-  palm3DMesh.visible = true;
-  // compute a world ray from center camera through normalized screen point
-  const x = palmNormalized.x * window.innerWidth;
-  const y = palmNormalized.y * window.innerHeight;
-  const ndc = new THREE.Vector2((x/window.innerWidth)*2 - 1, - (y/window.innerHeight)*2 + 1);
-  raycaster.setFromCamera(ndc, camLeft);
-  // cast and find intersection with menuMesh; if found, position palm3DMesh there; else project into forward direction at 2m
-  const hits = raycaster.intersectObject(menuMesh, true);
-  if (hits.length > 0){
-    const p = hits[0].point;
-    palm3DMesh.position.copy(p);
+    // pinch detection: distance between thumb tip (4) and index tip (8)
+    const thumb = landmarks[4], indexTip = landmarks[8];
+    const dx = (thumb.x - indexTip.x), dy = (thumb.y - indexTip.y);
+    const dist = Math.sqrt(dx*dx + dy*dy);
+    // threshold empirically ~0.05, adjust if needed
+    const pinched = dist < 0.05;
+
+    // pinch acts as click / drag if pointer intersects menuBar
+    if (pinched && pointer3D.visible && menuMesh && menuMesh.visible){
+      // if not currently dragging, begin drag if pointer intersects menuBar in 3D
+      if (!dragging){
+        // test quickly if pointer is close to menuBar world position
+        const p2 = menuBar.getWorldPosition(new THREE.Vector3());
+        if (pointer3D.position.distanceTo(p2) < 0.18) {
+          // start dragging
+          dragging = true;
+          dragStart = { startPos: menuMesh.position.clone(), pointer3DPos: pointer3D.position.clone() };
+        }
+      } else {
+        // if dragging, move menu to follow pointer offset
+        const offset = pointer3D.position.clone().sub(dragStart.pointer3DPos);
+        menuMesh.position.copy(dragStart.startPos.clone().add(offset));
+      }
+    } else {
+      // release drag
+      dragging = false;
+      dragStart = null;
+    }
   } else {
-    // point at default 1.6m along ray
-    const origin = raycaster.ray.origin.clone();
-    const dir = raycaster.ray.direction.clone();
-    const target = origin.add(dir.multiplyScalar(1.6));
-    palm3DMesh.position.copy(target);
+    pointer3D.visible = false;
+    latestHands = null;
   }
 }
 
-/* attempt to load mediapipe */
-tryLoadMediaPipeHands();
-
-/* ---------------- Utilities ---------------- */
-function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
-
-/* ---------------- initial portrait check ---------------- */
-updatePortrait();
-
-/* Expose some globals for debugging (optional) */
-window._stereo = {
-  startCamera: async ()=> {
-    if (stream) return;
-    const deviceToUse = useWide ? chosenIds.wide : chosenIds.rear;
-    stream = await startCameraStream(deviceToUse);
-    videoLeft.srcObject = stream; videoRight.srcObject = stream;
+/* attempt to detect orientation and flip video if necessary (Firefox mobile tends to rotate) */
+function applyVideoOrientationFix(){
+  // some browsers report videoWidth/videoHeight rotated; if so flip the video element
+  if (!videoLeft || !videoLeft.videoWidth) return;
+  const vw = videoLeft.videoWidth, vh = videoLeft.videoHeight;
+  // if width < height but element aspect ratio suggests landscape, rotate video by 90deg
+  const elRect = videoLeft.getBoundingClientRect();
+  const elAspect = elRect.width / elRect.height;
+  const vidAspect = vw / vh;
+  // if mismatch > 0.6 ratio, flip
+  if (Math.abs(vidAspect - elAspect) > 0.4) {
+    // try rotating to match orientation
+    // note: we set transform on both video elements
+    videoLeft.style.transform = 'rotate(90deg) scale(1)';
+    videoRight.style.transform = 'rotate(90deg) scale(1)';
+  } else {
+    videoLeft.style.transform = '';
+    videoRight.style.transform = '';
   }
+}
+
+/* utility debug */
+function debug(msg){
+  debugLog.style.display = 'block';
+  debugLog.textContent = msg;
+  setTimeout(()=> debugLog.style.display = 'none', 4000);
+}
+
+/* pointer3D add to scene3D if available */
+if (typeof THREE !== 'undefined'){
+  // will add pointer3D when scene3D initialized
+}
+
+/* double-tap top area to show UI */
+window.addEventListener('pointerdown', (ev)=>{ if (ev.clientY <= 140) showUI(); });
+
+/* initial layout & resize */
+layoutEyes(); updatePortrait();
+window.addEventListener('resize', ()=>{ layoutEyes(); updatePortrait(); if (renderer) { renderer.setSize(window.innerWidth, window.innerHeight); perspectiveBase.aspect = window.innerWidth / window.innerHeight; perspectiveBase.updateProjectionMatrix(); } });
+
+/* Ensure menu Mesh and pointer3D are attached to scene3D after init */
+(function attachWhenReady(){
+  const t = setInterval(()=>{
+    if (typeof scene3D !== 'undefined' && scene3D && menuMesh && pointer3D){
+      if (!scene3D.children.includes(pointer3D)) scene3D.add(pointer3D);
+      clearInterval(t);
+    }
+  }, 300);
+})();
+
+/* ------------------ Double-tap reliable toggle for menu (separate mobile-friendly) ------------------ */
+let lastTapTime = 0;
+window.addEventListener('pointerdown', (ev)=>{
+  const now = Date.now();
+  if (now - lastTapTime < 300){
+    // If portrait overlay visible, ignore
+    if (portraitOverlay.style.display === 'flex') return;
+    toggleMenu();
+  }
+  lastTapTime = now;
+});
+
+/* final: remove debug text if present on user's request, and smooth initial behaviors */
+debugLog.style.display = 'none';
+
+/* expose a small API for debugging in console */
+window._stereoViewer = {
+  spawnMenu,
+  hideMenu,
+  toggleMenu,
+  layoutEyes
 };
 
-})(); // end async IIFE
 </script>
 </body>
 </html>
