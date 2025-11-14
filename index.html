@@ -2,16 +2,16 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover">
-<title>VR AR Menu</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VR AR Menu Demo</title>
 <style>
   html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#000; font-family:system-ui; }
+  #leftEye, #rightEye { position:absolute; top:0; height:100%; overflow:hidden; }
+  #leftEye { left:0; width:45%; }
+  #rightEye { right:0; width:45%; }
   #ui { position:absolute; top:10px; left:10px; z-index:10; color:#fff; }
   #fullscreenBtn { position:absolute; top:10px; right:10px; z-index:10; }
-  #fovSlider { position:absolute; top:10px; left:10px; z-index:10; }
-  #leftEye, #rightEye { position:absolute; top:0; width:45%; height:100%; overflow:hidden; }
-  #leftEye { left:0; }
-  #rightEye { right:0; }
+  #fovSlider { position:absolute; top:10px; left:10px; z-index:11; }
 </style>
 </head>
 <body>
@@ -27,62 +27,64 @@
 <script src="three.min.js"></script>
 <script src="menu-tracking.js"></script>
 <script src="hand-tracking.js"></script>
+
 <script>
-const fovSlider = document.getElementById('fovSlider');
 const leftEye = document.getElementById('leftEye');
 const rightEye = document.getElementById('rightEye');
+const fovSlider = document.getElementById('fovSlider');
 const fullscreenBtn = document.getElementById('fullscreenBtn');
 
 let cameraStream;
 
-// Request rear camera and render to both eyes
+// Start rear camera and duplicate feed to both eyes
 async function startCamera() {
-  cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 3840 }, height: { ideal: 2160 } }, audio:false });
-  const video = document.createElement('video');
-  video.srcObject = cameraStream;
-  video.play();
-  video.onloadedmetadata = () => {
-    [leftEye, rightEye].forEach(eye => {
-      const vidClone = video.cloneNode();
-      vidClone.autoplay = true;
-      vidClone.muted = true;
-      vidClone.playsInline = true;
-      eye.innerHTML = '';
-      eye.appendChild(vidClone);
+  try {
+    cameraStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: "environment" }, width: { ideal: 3840 }, height: { ideal: 2160 } },
+      audio: false
     });
+    const video = document.createElement('video');
+    video.srcObject = cameraStream;
+    video.autoplay = true;
+    video.muted = true;
+    video.playsInline = true;
+
+    video.onloadedmetadata = () => {
+      [leftEye, rightEye].forEach(eye => {
+        const clone = video.cloneNode();
+        clone.autoplay = true;
+        clone.muted = true;
+        clone.playsInline = true;
+        eye.innerHTML = '';
+        eye.appendChild(clone);
+      });
+    };
+  } catch (err) {
+    console.error("Camera init failed:", err);
   }
 }
 
 // Fullscreen button
-fullscreenBtn.addEventListener('click', () => {
-  document.documentElement.requestFullscreen();
-});
+fullscreenBtn.addEventListener('click', () => document.documentElement.requestFullscreen());
 
-// FOV slider
+// FOV slider dynamically scales eye windows
 fovSlider.addEventListener('input', () => {
-  const scale = fovSlider.value/70;
-  leftEye.style.width = `${45*scale}%`;
-  rightEye.style.width = `${45*scale}%`;
+  const scale = fovSlider.value / 70;
+  leftEye.style.width = `${45 * scale}%`;
+  rightEye.style.width = `${45 * scale}%`;
 });
 
-// Double-tap menu spawn
+// Double-tap to spawn/hide menu
 let lastTap = 0;
-document.body.addEventListener('touchend', (e) => {
-  const currentTime = new Date().getTime();
-  const tapLength = currentTime - lastTap;
-  if (tapLength < 300 && tapLength > 0) {
-    spawnMenu();
-  }
+document.body.addEventListener('touchend', () => {
+  const currentTime = Date.now();
+  if (currentTime - lastTap < 300) spawnMenu();
   lastTap = currentTime;
 });
 
-// Start camera automatically
+// Initialize everything
 startCamera();
-
-// Initialize AR/6DOF menu
 initMenuTracking();
-
-// Initialize hand tracking
 initHandTracking();
 </script>
 </body>
